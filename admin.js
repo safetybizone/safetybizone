@@ -4,23 +4,24 @@ import {
   CTYPES, CATS, PEOPLE, STATUSES, ASTAT, PRI, QS, auditScore, auditOutcome, ocol, toast, openModal, closeModal, confirmBox,
   fetchAll, rows, byId, ins, upd, del, queue, niceError, field, area, sel, shell, signFormHTML, mountPad, submitSignOff, onRerender,
 } from './core.js';
-import { assessmentPDF, signOffsPDF } from './pdf.js';
+import { assessmentPDF, signOffsPDF, ctlScore, pct } from './pdf.js';
+import { ccView, ccClick, ccTotals, ccAttention } from './compliance.js';
 
-const S = { me: null, q: '', fClient: '', fStatus: '', af: 'open', draft: null, logs: {}, sigs: {}, hq: '', hcat: '', cq: '', so: {}, tq: '', tsec: '' };
+const S = { me: null, ccClient: '', q: '', fClient: '', fStatus: '', af: 'open', draft: null, logs: {}, sigs: {}, hq: '', hcat: '', cq: '', so: {}, tq: '', tsec: '' };
 let route = [];
 
 // ---------- load ----------
 export async function loadAdmin(me) {
   S.me = me;
   const ackCols = 'id,assessment_id,version,user_id,email,full_name,job_title,method,site_id,statement,acknowledged_at';
-  const [clients, sites, invites, profiles, hreg, creg, hrc, ras, hz, ctl, acts, audits, pubs, acks, topics, thz, tct] = await Promise.all([
+  const [clients, sites, invites, profiles, hreg, creg, hrc, ras, hz, ctl, acts, audits, pubs, acks, topics, thz, tct, cdt, sdocs] = await Promise.all([
     fetchAll('clients'), fetchAll('sites'), fetchAll('portal_invites'), fetchAll('profiles'), fetchAll('hazard_register'), fetchAll('control_register'),
     fetchAll('hazard_register_controls'), fetchAll('assessments'), fetchAll('assessment_hazards'), fetchAll('assessment_controls'), fetchAll('actions'),
     fetchAll('audits'), fetchAll('published_assessments', 'id,assessment_id,client_id,site_id,version,note,published_at,published_by'), fetchAll('acknowledgements', ackCols),
-    fetchAll('topic_library'), fetchAll('topic_hazards'), fetchAll('topic_controls'),
+    fetchAll('topic_library'), fetchAll('topic_hazards'), fetchAll('topic_controls'), fetchAll('compliance_doc_types'), fetchAll('site_documents'),
   ]);
   Object.assign(D, { clients, sites, portal_invites: invites, profiles, hazard_register: hreg, control_register: creg, hazard_register_controls: hrc, assessments: ras,
-    assessment_hazards: hz, assessment_controls: ctl, actions: acts, audits, published_assessments: pubs, acknowledgements: acks, topic_library: topics, topic_hazards: thz, topic_controls: tct });
+    assessment_hazards: hz, assessment_controls: ctl, actions: acts, audits, published_assessments: pubs, acknowledgements: acks, topic_library: topics, topic_hazards: thz, topic_controls: tct, compliance_doc_types: cdt, site_documents: sdocs });
 }
 
 // ---------- lookups ----------
@@ -54,6 +55,7 @@ export function adminView(r) {
     { k: 'dash', href: '', icon: 'dash', label: 'Dashboard' },
     { k: 'clients', href: 'clients', icon: 'clients', label: 'Clients and sites', c: rows('clients').length },
     { k: 'ras', href: 'ras', icon: 'ra', label: 'Risk assessments', c: live().length },
+    { k: 'compliance', href: 'compliance', icon: 'cert', label: 'Compliance centre', c: (() => { const t = ccTotals(rows('sites').map((x) => x.id)); return t.Expired + t['Due soon'] || ''; })() },
     { k: 'topics', href: 'topics', icon: 'lib', label: 'Topic library', c: rows('topic_library').filter((t) => t.active).length },
     { k: 'hazards', href: 'hazards', icon: 'hz', label: 'Hazard register' },
     { k: 'controls', href: 'controls', icon: 'ctl', label: 'Control register' },
@@ -66,6 +68,7 @@ export function adminView(r) {
   else if (p0 === 'client') { active = 'clients'; title = 'Client'; body = vClient(p1); }
   else if (p0 === 'ras') { active = 'ras'; title = 'Risk assessments'; body = vRAs(); }
   else if (p0 === 'ra') { active = 'ras'; title = 'Risk assessment'; body = vRA(p1, p2 || 'details'); }
+  else if (p0 === 'compliance') { active = 'compliance'; title = 'Compliance centre'; body = ccView(r, { admin: true, base: 'compliance', clientName: cName, clientFilter: S.ccClient }); }
   else if (p0 === 'topics') { active = 'topics'; title = 'Topic library'; body = vTopics(); }
   else if (p0 === 'hazards') { active = 'hazards'; title = 'Hazard register'; body = vHazReg(); }
   else if (p0 === 'controls') { active = 'controls'; title = 'Control register'; body = vCtlReg(); }
@@ -82,10 +85,11 @@ function vDash() {
   const soon = addDays(today(), 30), month = addDays(today(), -30);
   const od = acts.filter(isOd), due = L.filter((a) => a.review_date && a.review_date <= soon).sort((a, b) => a.review_date.localeCompare(b.review_date));
   const hi = [...L].filter((a) => scoreOf(a, 'res') || scoreOf(a, 'init')).sort((a, b) => (scoreOf(b, 'res') || scoreOf(b, 'init')) - (scoreOf(a, 'res') || scoreOf(a, 'init'))).slice(0, 6);
+  const cc = ccTotals(rows('sites').map((x) => x.id)), ccAtt = ccAttention(rows('sites').map((x) => x.id), 4);
   const recent = [...rows('acknowledgements')].sort((a, b) => b.acknowledged_at.localeCompare(a.acknowledged_at)).slice(0, 6);
   const st = [[rows('clients').length, 'Clients'], [L.length, 'Live risk assessments'], [L.filter((a) => scoreOf(a, 'res') >= 10).length, 'High risk with controls', 1],
     [acts.filter((x) => x.status !== 'Done').length, 'Open actions'], [od.length, 'Overdue actions', 1], [due.length, 'Renewals due in 30 days', 1],
-    [rows('acknowledgements').filter((a) => a.acknowledged_at >= month).length, 'Sign-offs in last 30 days']];
+    [rows('acknowledgements').filter((a) => a.acknowledged_at >= month).length, 'Sign-offs in last 30 days'], [cc.Expired, 'Certificates expired', 1], [cc['Due soon'], 'Certificates due in 30 days', 1]];
   const st1 = `<div class="stats">${st.map(([n, l, al]) => `<div class="stat${al && n ? ' alert' : ''}"><span>${l}</span><b>${n}</b></div>`).join('')}</div>`;
   if (!rows('clients').length) return `<div class="page">${st1}${empty('Start by onboarding a client', 'Add the client\'s head office and sites, then create risk assessments for them from your hazard and control registers.', '<button class="btn pri" data-act="onboard">+ Onboard a client</button>')}</div>`;
   return `<div class="page"><div class="sect"><div><h2>Risk overview</h2><p class="muted" style="margin:4px 0 0">Every client, their highest risks and what needs doing next.</p></div><div class="row"><button class="btn" data-act="onboard">+ Onboard client</button><button class="btn pri" data-act="newRA">+ Create risk assessment</button></div></div>${st1}
@@ -93,7 +97,8 @@ function vDash() {
   <div class="panel"><h3 style="font-size:16px;margin-bottom:8px">Needs attention</h3>${od.slice(0, 5).map((x) => { const a = byId('assessments', x.assessment_id); return `<a class="li" href="#/ra/${x.assessment_id}/actions"><span class="tag bad">Overdue</span><span><b>${esc(x.title || 'Untitled action')}</b><br><span class="muted">Due ${fd(x.due_date)} · ${esc(x.owner || 'No owner')} · ${esc(cName(a?.client_id))}</span></span></a>`; }).join('')}
   ${due.slice(0, 4).map((a) => `<a class="li" href="#/ra/${a.id}/details"><span class="tag warn">Renewal</span><span><b>${esc(a.title || 'Untitled')}</b><br><span class="muted">${a.review_date < today() ? 'Was due' : 'Due'} ${fd(a.review_date)} · ${esc(cName(a.client_id))}</span></span></a>`).join('')}
   ${L.filter((a) => !a.published_version && a.status === 'Active').slice(0, 3).map((a) => `<a class="li" href="#/ra/${a.id}/publish"><span class="tag">Unpublished</span><span><b>${esc(a.title || 'Untitled')}</b><br><span class="muted">Active but the client can't see it yet</span></span></a>`).join('')}
-  ${!od.length && !due.length ? '<p class="muted">Nothing overdue and no renewals due in the next 30 days.</p>' : ''}</div></div>
+  ${ccAtt.map(({ sid, t, d, s: st }) => { const site = byId('sites', sid); return `<a class="li" href="#/compliance/${sid}"><span class="tag ${st === 'Expired' ? 'bad' : 'warn'}">${st === 'Expired' ? 'Expired' : 'Due soon'}</span><span><b>${esc(t.name)}</b><br><span class="muted">${esc(cName(site?.client_id))} · ${esc(site?.name)} · ${fd(d.expiry_date)}</span></span></a>`; }).join('')}
+  ${!od.length && !due.length && !ccAtt.length ? '<p class="muted">Nothing overdue, no renewals and no certificates due in the next 30 days.</p>' : ''}</div></div>
   <div class="panel"><div class="sect"><h3>Latest sign-offs</h3><a class="btn sm" href="#/signoffs">All sign-offs</a></div>${recent.length ? recent.map((k) => { const a = byId('assessments', k.assessment_id); return `<a class="li" href="#/ra/${k.assessment_id}/publish"><span class="tag ok">Signed</span><span><b>${esc(k.full_name)}</b>${k.job_title ? ', ' + esc(k.job_title) : ''}<br><span class="muted">${esc(a?.title || '')} v${k.version} · ${esc(cName(a?.client_id))} · ${ft(k.acknowledged_at)}${k.method === 'In person' ? ' · in person' : ''}</span></span></a>`; }).join('') : '<p class="muted">No sign-offs yet. Publish an assessment and invite the client\'s staff.</p>'}</div></div>`;
 }
 
@@ -143,7 +148,7 @@ function vClient(id) {
   <div class="sect" style="margin-top:8px"><h2>${esc(c.name)}</h2><div class="row"><button class="btn" data-act="newRA" data-client="${id}">+ Create risk assessment</button><button class="btn dng" data-act="delClient" data-id="${id}">Delete client</button></div></div>
   <div class="panel"><h3 style="font-size:16px;margin-bottom:12px">Head office and contact</h3><div class="g2">${field(`clients|${id}|name`, c.name, 'Company name')}${field(`clients|${id}|contact_name`, c.contact_name, 'Contact name')}${field(`clients|${id}|contact_email`, c.contact_email, 'Contact email', 'email')}${field(`clients|${id}|phone`, c.phone, 'Phone')}${area(`clients|${id}|notes`, c.notes, 'Notes', ' class="full"')}</div></div>
   <div class="panel"><div class="sect"><h3>Sites</h3><button class="btn sm" data-act="addSite" data-id="${id}">+ Add site</button></div>
-  <div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Address</th><th>Site contact</th><th>Phone</th><th>Assessments</th><th></th></tr></thead><tbody>${sites.map((s) => `<tr><td data-l="Site"><input id="s-${s.id}-n" data-b="sites|${s.id}|name" value="${esc(s.name)}" aria-label="Site name">${s.is_head_office ? '<span class="muted">Head office</span>' : ''}</td><td data-l="Address"><input id="s-${s.id}-a" data-b="sites|${s.id}|address" value="${esc(s.address)}" aria-label="Address"></td><td data-l="Site contact"><input id="s-${s.id}-c" data-b="sites|${s.id}|site_contact" value="${esc(s.site_contact)}" aria-label="Site contact"></td><td data-l="Phone"><input id="s-${s.id}-p" data-b="sites|${s.id}|phone" value="${esc(s.phone)}" aria-label="Phone"></td><td data-l="Assessments">${ras.filter((a) => a.site_id === s.id).length}</td><td>${s.is_head_office ? '' : `<button class="btn sm ghost" data-act="delSite" data-id="${s.id}" aria-label="Remove site">✕</button>`}</td></tr>`).join('')}</tbody></table></div></div>
+  <div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Address</th><th>Site contact</th><th>Phone</th><th>Assessments</th><th>Compliance</th><th></th></tr></thead><tbody>${sites.map((s) => `<tr><td data-l="Site"><input id="s-${s.id}-n" data-b="sites|${s.id}|name" value="${esc(s.name)}" aria-label="Site name">${s.is_head_office ? '<span class="muted">Head office</span>' : ''}</td><td data-l="Address"><input id="s-${s.id}-a" data-b="sites|${s.id}|address" value="${esc(s.address)}" aria-label="Address"></td><td data-l="Site contact"><input id="s-${s.id}-c" data-b="sites|${s.id}|site_contact" value="${esc(s.site_contact)}" aria-label="Site contact"></td><td data-l="Phone"><input id="s-${s.id}-p" data-b="sites|${s.id}|phone" value="${esc(s.phone)}" aria-label="Phone"></td><td data-l="Assessments">${ras.filter((a) => a.site_id === s.id).length}</td><td data-l="Compliance"><a class="btn sm" href="#/compliance/${s.id}">Certificates</a></td><td>${s.is_head_office ? '' : `<button class="btn sm ghost" data-act="delSite" data-id="${s.id}" aria-label="Remove site">✕</button>`}</td></tr>`).join('')}</tbody></table></div></div>
   <div class="panel"><div class="sect"><div><h3>Client portal users</h3><p class="hint">Managers see every site and keep the sign-off records. Staff see their site (or all sites) and sign. Portal address: <b>${esc(portal)}</b> <button class="btn sm" data-act="copy" data-v="${esc(portal)}">Copy</button></p></div><button class="btn sm pri" data-act="invite" data-client="${id}">+ Add portal user</button></div>
   ${inv.length ? `<div class="tw"><table class="stack"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Site</th><th>Job title</th><th>Status</th><th></th></tr></thead><tbody>${inv.map((i) => `<tr><td data-l="Name">${esc(i.full_name || '—')}</td><td data-l="Email">${esc(i.email)}</td><td data-l="Role">${sel(`portal_invites|${i.id}|role`, i.role, [['client_admin', 'Manager'], ['staff', 'Staff']], '')}</td><td data-l="Site">${sel(`portal_invites|${i.id}|site_id`, i.site_id || '', [['', 'All sites']].concat(sites.map((s) => [s.id, s.name])), '')}</td><td data-l="Job title">${esc(i.job_title || '—')}</td><td data-l="Status">${joined(i.email) ? '<span class="tag ok">Joined</span>' : '<span class="tag">Invited</span>'}</td><td><button class="btn sm ghost" data-act="delInvite" data-id="${i.id}" aria-label="Remove access">Remove</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No portal users yet. Add a manager first; they can add their own staff.</p>'}</div>
   <div class="panel"><div class="sect"><h3>Risk assessments</h3></div>${ras.length ? raTable(ras) : '<p class="muted">None yet.</p>'}</div></div>`;
@@ -201,11 +206,18 @@ async function newRASave() {
   try {
     await ins('assessments', a);
     if (from && isTopic) {
-      rows('topic_hazards').filter((l) => l.topic_id === from.id).sort((x, y) => x.sort - y.sort).forEach((l, i) => { const r = byId('hazard_register', l.hazard_id); if (r) ins('assessment_hazards', { assessment_id: a.id, register_id: r.id, title: r.title, category: r.category, description: r.description, sort: i }); });
-      rows('topic_controls').filter((l) => l.topic_id === from.id).sort((x, y) => x.sort - y.sort).forEach((l, i) => { const r = byId('control_register', l.control_id); if (r) ins('assessment_controls', { assessment_id: a.id, register_id: r.id, title: r.title, description: r.description, type: r.type, state: 'In place', sort: i }); });
+      // Each topic control goes under the first topic hazard it is linked to in the registers; others become general controls.
+      const tH = rows('topic_hazards').filter((l) => l.topic_id === from.id).sort((x, y) => x.sort - y.sort), hmap = {};
+      tH.forEach((l, i) => { const r = byId('hazard_register', l.hazard_id); if (!r) return; hmap[r.id] = uid(); ins('assessment_hazards', { id: hmap[r.id], assessment_id: a.id, register_id: r.id, title: r.title, category: r.category, description: r.description, sort: i }); });
+      rows('topic_controls').filter((l) => l.topic_id === from.id).sort((x, y) => x.sort - y.sort).forEach((l, i) => {
+        const r = byId('control_register', l.control_id); if (!r) return;
+        const owner = tH.find((t) => hmap[t.hazard_id] && rows('hazard_register_controls').some((x) => x.hazard_id === t.hazard_id && x.control_id === r.id));
+        ins('assessment_controls', { assessment_id: a.id, assessment_hazard_id: owner ? hmap[owner.hazard_id] : null, register_id: r.id, title: r.title, description: r.description, type: r.type, state: 'In place', sort: i });
+      });
     } else if (from) {
-      for (const h of raHz(from.id)) ins('assessment_hazards', { assessment_id: a.id, register_id: h.register_id, title: h.title, category: h.category, description: h.description, sort: h.sort });
-      for (const c of raCtl(from.id)) ins('assessment_controls', { assessment_id: a.id, register_id: c.register_id, title: c.title, description: c.description, type: c.type, state: c.state, sort: c.sort });
+      const hmap = {};
+      for (const h of raHz(from.id)) { hmap[h.id] = uid(); ins('assessment_hazards', { id: hmap[h.id], assessment_id: a.id, register_id: h.register_id, title: h.title, category: h.category, description: h.description, sort: h.sort }); }
+      for (const c of raCtl(from.id)) ins('assessment_controls', { assessment_id: a.id, assessment_hazard_id: hmap[c.assessment_hazard_id] || null, register_id: c.register_id, title: c.title, description: c.description, type: c.type, state: c.state, sort: c.sort });
     }
     location.hash = `#/ra/${a.id}/${from ? 'details' : 'hazards'}`;
   } catch (e) { /* shown */ }
@@ -213,10 +225,11 @@ async function newRASave() {
 
 function vRA(id, tab) {
   const a = byId('assessments', id); if (!a) return `<div class="page">${empty('Risk assessment not found', '')}</div>`;
-  const tabs = [['details', 'Details'], ['hazards', 'Hazards', raHz(id).length], ['controls', 'Control measures', raCtl(id).length], ['rating', 'Risk rating'], ['actions', 'Actions', raActs(id).filter((x) => x.status !== 'Done').length], ['audits', 'Audits', rows('audits').filter((u) => u.assessment_id === id).length], ['publish', 'Publish and sign-offs', raAcks(id).length], ['history', 'History']];
-  const fn = { details: tDetails, hazards: tHazards, controls: tControls, rating: tRating, actions: tActions, audits: tAudits, publish: tPublish, history: tHistory }[tab] || tDetails;
+  const tabs = [['details', 'Details'], ['hazards', 'Hazards and controls', raHz(id).length], ['rating', 'Overall rating'], ['actions', 'Actions', raActs(id).filter((x) => x.status !== 'Done').length], ['audits', 'Audits', rows('audits').filter((u) => u.assessment_id === id).length], ['summary', 'Summary and approval'], ['publish', 'Publish and sign-offs', raAcks(id).length], ['history', 'History']];
+  if (tab === 'controls') tab = 'hazards';
+  const fn = { details: tDetails, hazards: tHazards, controls: tHazards, rating: tRating, summary: tSummary, actions: tActions, audits: tAudits, publish: tPublish, history: tHistory }[tab] || tDetails;
   return `<div class="head"><div class="row"><a class="btn sm ghost" href="#/ras">← Risk assessments</a><div class="row sp"><button class="btn sm" data-act="pdf" data-id="${id}">Export PDF</button><button class="btn sm" data-act="dupRA" data-id="${id}">Copy to another site</button><button class="btn sm dng" data-act="delRA" data-id="${id}">Delete</button></div></div>
-  <h2>${esc(a.title || 'Untitled risk assessment')}</h2><div class="meta"><b style="color:var(--ink)">${esc(a.ref)}</b><span>${esc(cName(a.client_id))} · ${esc(sName(a.site_id))}</span>${statusTag(a.status)}${pubTag(a)}<span>With controls ${chip(scoreOf(a, 'res'), true)}</span><span>Renewal <b class="${a.review_date && a.review_date < today() ? 'od-t' : ''}">${fd(a.review_date)}</b></span></div>
+  <h2>${esc(a.title || 'Untitled risk assessment')}</h2><div class="meta"><b style="color:var(--ink)">${esc(a.ref)}</b><span>${esc(cName(a.client_id))} · ${esc(sName(a.site_id))}</span>${statusTag(a.status)}${pubTag(a)}${(() => { const k = ctlScore(raCtl(a.id)); return `<span>Score <b style="color:var(--ink)">${pct(k)}</b></span><span>Flagged <b style="color:${k.f ? 'var(--vh)' : 'var(--ink)'}">${k.f}</b></span><span>Actions <b style="color:var(--ink)">${raActs(a.id).filter((x) => x.status !== 'Done').length}</b></span>`; })()}${a.approved_at ? '<span class="tag ok">Complete</span>' : '<span class="tag warn">Incomplete</span>'}<span>Renewal <b class="${a.review_date && a.review_date < today() ? 'od-t' : ''}">${fd(a.review_date)}</b></span></div>
   <nav class="tabs">${tabs.map(([k, l, n]) => `<a href="#/ra/${id}/${k}" class="${tab === k ? 'on' : ''}">${l}${n != null ? `<span class="n">${n}</span>` : ''}</a>`).join('')}</nav></div><div class="page">${fn(a)}</div>`;
 }
 function tDetails(a) {
@@ -226,42 +239,77 @@ function tDetails(a) {
   ${area(`assessments|${id}|description`, a.description, 'Description — what this assessment covers', ' class="full"')}
   <div class="full"><label>People exposed</label><div class="row" style="margin-top:6px">${PEOPLE.concat(extra).map((p) => `<label class="chk" style="border:1px solid var(--line);border-radius:20px;padding:6px 12px;background:${ppl.includes(p) ? 'var(--soft)' : '#fff'}"><input type="checkbox" data-act="ppl" data-v="${esc(p)}"${ppl.includes(p) ? ' checked' : ''}> ${esc(p)}</label>`).join('')}
   <input id="ppl-new" placeholder="Add other…" style="width:180px"><button class="btn sm" data-act="pplAdd">Add</button></div></div>
-  ${field(`assessments|${id}|assessor`, a.assessor, 'Assessor')}${sel(`assessments|${id}|status`, a.status, STATUSES, 'Status')}
-  ${field(`assessments|${id}|assessment_date`, a.assessment_date, 'Assessment date', 'date')}${field(`assessments|${id}|review_date`, a.review_date, 'Renewal date', 'date')}
+  ${field(`assessments|${id}|assessor`, a.assessor, 'Prepared by')}${field(`assessments|${id}|accompanied_by`, a.accompanied_by, 'Accompanied by')}${sel(`assessments|${id}|status`, a.status, STATUSES, 'Status')}
+  ${field(`assessments|${id}|assessment_date`, a.assessment_date, 'Conducted on', 'date')}${field(`assessments|${id}|review_date`, a.review_date, 'Renewal date', 'date')}
   ${area(`assessments|${id}|notes`, a.notes, 'Internal notes (not shown to the client)', ' class="full"')}</div></div>
-  <p class="hint">Next: add <a href="#/ra/${id}/hazards">hazards</a> from your register.</p>`;
+  <p class="hint">Next: pick the <a href="#/ra/${id}/hazards">hazards and their controls</a>.</p>`;
+}
+const hzCtl = (aid, hid) => raCtl(aid).filter((c) => (c.assessment_hazard_id || null) === (hid || null));
+function suggestedFor(a, h) {
+  if (!h.register_id) return [];
+  const have = new Set(hzCtl(a.id, h.id).map((c) => c.register_id).filter(Boolean));
+  return rows('hazard_register_controls').filter((l) => l.hazard_id === h.register_id && !have.has(l.control_id)).map((l) => byId('control_register', l.control_id)).filter((c) => c && c.active);
+}
+function ctlRow(a, c) {
+  const act = rows('actions').find((x) => x.assessment_control_id === c.id);
+  return `<div class="cbox"><div class="ctl">${sel(`assessment_controls|${c.id}|type`, c.type, CTYPES, '')}<input id="c-${c.id}-t" data-b="assessment_controls|${c.id}|title" value="${esc(c.title)}" placeholder="Control measure" aria-label="Control measure">${sel(`assessment_controls|${c.id}|state`, c.state, [['In place', 'Yes — in place'], ['Planned', 'No — not in place'], ['N/A', 'N/A']], '')}
+  ${act ? `<a class="linked" href="#/ra/${a.id}/actions">✓ Action ${act.status === 'Done' ? 'done' : act.status.toLowerCase()}</a>` : c.state === 'Planned' ? `<button class="btn sm" data-act="ctlAct" data-id="${c.id}">Create action</button>` : '<span></span>'}<button class="btn sm ghost" data-act="delCtl" data-id="${c.id}" aria-label="Remove control">✕</button></div>
+  <textarea id="c-${c.id}-d" data-b="assessment_controls|${c.id}|description" placeholder="Description (optional)" style="min-height:48px">${esc(c.description)}</textarea></div>`;
+}
+const RL = [[0, '–'], [1, '1 Rare'], [2, '2 Unlikely'], [3, '3 Possible'], [4, '4 Likely'], [5, '5 Almost certain']], RS = [[0, '–'], [1, '1 Negligible'], [2, '2 Minor'], [3, '3 Moderate'], [4, '4 Major'], [5, '5 Catastrophic']];
+function hzMeta(a, h) {
+  const rs = (h.risk_l || 0) * (h.risk_s || 0), pa = h.people_affected || [], acts = raActs(a.id).filter((x) => x.assessment_hazard_id === h.id);
+  return `<div class="hzm"><div><h4>Risk score</h4><div class="row" style="flex-wrap:nowrap">${sel(`assessment_hazards|${h.id}|risk_l`, h.risk_l || 0, RL, '')}<span>×</span>${sel(`assessment_hazards|${h.id}|risk_s`, h.risk_s || 0, RS, '')}</div><div style="margin-top:6px">${chip(rs)}</div><p class="hint" style="margin-top:4px">Likelihood × severity, with the controls above in place.</p></div>
+  <div><h4>Person affected</h4><div class="row">${PEOPLE.slice(0, 9).concat(pa.filter((p) => !PEOPLE.slice(0, 9).includes(p))).map((p) => `<button class="chipbtn${pa.includes(p) ? ' on' : ''}" data-act="hzPpl" data-h="${h.id}" data-v="${esc(p)}">${pa.includes(p) ? '✓ ' : ''}${esc(p)}</button>`).join('')}</div></div>
+  <div class="full"><div class="row"><h4>Actions <span class="muted">(${acts.length})</span></h4><button class="btn sm sp" data-act="addAct" data-h="${h.id}">+ Add action</button></div>
+  ${acts.length ? acts.map((x) => `<div class="li" style="padding:6px 0"><span class="tag ${x.status === 'Done' ? 'ok' : isOd(x) ? 'bad' : ''}">${esc(x.status)}</span><span><b>${esc(x.title || 'Untitled action')}</b><br><span class="muted">${esc(x.owner || 'No owner')} · due ${fd(x.due_date)}</span></span></div>`).join('') + `<a class="hint" href="#/ra/${a.id}/actions">Edit actions</a>` : '<p class="muted" style="margin:2px 0">No actions for this hazard.</p>'}</div></div>`;
+}
+function ctlBlock(a, h) {
+  const list = hzCtl(a.id, h?.id), sug = h ? suggestedFor(a, h) : [], hid = h ? h.id : '';
+  return `<div class="hzc"><div class="row" style="margin-bottom:8px"><h4 style="font-size:14.5px">Control measures <span class="muted">${h ? pct(ctlScore(list)) : '(' + list.length + ')'}</span></h4><div class="row sp"><button class="btn sm" data-act="ctlPick" data-h="${hid}">Choose from control register</button><button class="btn sm pri" data-act="ctlNew" data-h="${hid}">+ Create control</button></div></div>
+  ${sug.length ? `<div class="sugg"><div class="row" style="margin-bottom:6px"><b style="font-size:13px">Suggested for this hazard</b><button class="btn sm sp" data-act="ctlAddAll" data-h="${hid}">Add all ${sug.length}</button></div><div class="row">${sug.map((c) => `<button class="chipbtn" data-act="ctlAddReg" data-id="${c.id}" data-h="${hid}">+ ${esc(c.title)}</button>`).join('')}</div></div>` : ''}
+  ${list.length ? list.map((c) => ctlRow(a, c)).join('') : `<p class="muted" style="margin:4px 0">No controls yet — choose from the control register or create one.</p>`}</div>`;
 }
 function tHazards(a) {
-  const hz = raHz(a.id);
-  return `<div class="sect"><h2>Hazards</h2><div class="row"><button class="btn" data-act="hzCustom">+ Custom hazard</button><button class="btn pri" data-act="hzPick">+ Add from hazard register</button></div></div>
-  ${hz.length ? hz.map((h, i) => `<div class="hz"><div class="hzh"><span class="hn">${i + 1}</span><input class="t" id="h-${h.id}-t" data-b="assessment_hazards|${h.id}|title" value="${esc(h.title)}" placeholder="Hazard, e.g. Electrocution" aria-label="Hazard">${sel(`assessment_hazards|${h.id}|category`, h.category, CATS, '')}<button class="btn sm ghost" data-act="delHz" data-id="${h.id}">Remove</button></div>
-  <div style="margin-top:10px">${area(`assessment_hazards|${h.id}|description`, h.description, 'Description')}</div>${h.register_id ? '<p class="hint">From the hazard register.</p>' : ''}</div>`).join('') + `<p class="hint">Next: choose the <a href="#/ra/${a.id}/controls">control measures</a> — suggestions come from the hazards you picked.</p>`
-    : empty('No hazards yet', 'Pick the hazards that apply to this client from your hazard register, or add your own.', '<button class="btn pri" data-act="hzPick">+ Add from hazard register</button>')}`;
-}
-function suggestedControls(a) {
-  const hzRegIds = raHz(a.id).map((h) => h.register_id).filter(Boolean), have = new Set(raCtl(a.id).map((c) => c.register_id).filter(Boolean));
-  const ids = [...new Set(rows('hazard_register_controls').filter((l) => hzRegIds.includes(l.hazard_id)).map((l) => l.control_id))].filter((cid) => !have.has(cid));
-  return ids.map((cid) => byId('control_register', cid)).filter((c) => c && c.active);
-}
-function tControls(a) {
-  const cs = raCtl(a.id), sug = suggestedControls(a);
-  return `<div class="sect"><h2>Control measures</h2><div class="row"><button class="btn" data-act="ctlCustom">+ Custom control</button><button class="btn pri" data-act="ctlPick">+ Add from control register</button></div></div>
-  ${sug.length ? `<div class="sugg"><div class="row" style="margin-bottom:6px"><b style="font-size:14px">Suggested for these hazards</b><button class="btn sm sp" data-act="ctlAddAll">Add all ${sug.length}</button></div><div class="row">${sug.map((c) => `<button class="chipbtn" data-act="ctlAddReg" data-id="${c.id}">+ ${esc(c.title)}</button>`).join('')}</div></div>` : ''}
-  ${cs.length ? cs.map((c) => { const act = rows('actions').find((x) => x.assessment_control_id === c.id); return `<div class="hz"><div class="ctl">${sel(`assessment_controls|${c.id}|type`, c.type, CTYPES, '')}<input id="c-${c.id}-t" data-b="assessment_controls|${c.id}|title" value="${esc(c.title)}" placeholder="Control measure" aria-label="Control measure">${sel(`assessment_controls|${c.id}|state`, c.state, ['In place', 'Planned'], '')}
-  ${act ? `<a class="linked" href="#/ra/${a.id}/actions">✓ Action ${act.status === 'Done' ? 'done' : act.status.toLowerCase()}</a>` : c.state === 'Planned' ? `<button class="btn sm" data-act="ctlAct" data-id="${c.id}">Create action</button>` : '<span></span>'}<button class="btn sm ghost" data-act="delCtl" data-id="${c.id}" aria-label="Remove control">✕</button></div>
-  <textarea id="c-${c.id}-d" data-b="assessment_controls|${c.id}|description" placeholder="Description" style="min-height:56px">${esc(c.description)}</textarea></div>`; }).join('')
-    : empty('No control measures yet', 'Add the controls that reduce these risks. Mark any not yet in place as Planned and turn them into actions.', '')}
-  <p class="hint">Next: set the <a href="#/ra/${a.id}/rating">risk rating</a> without and with controls.</p>`;
+  const hz = raHz(a.id), gen = raCtl(a.id).filter((c) => !c.assessment_hazard_id || !hz.some((h) => h.id === c.assessment_hazard_id));
+  return `<div class="sect"><div><h2>Hazards and controls</h2><p class="hint">Pick the hazards for this activity, then choose or create the controls for each one.</p></div><div class="row"><button class="btn" data-act="hzCustom">+ Custom hazard</button><button class="btn pri" data-act="hzPick">+ Add hazards from register</button></div></div>
+  ${hz.length ? hz.map((h, i) => `<div class="hz"><div class="hzh"><span class="hn">${i + 1}</span><input class="t" id="h-${h.id}-t" data-b="assessment_hazards|${h.id}|title" value="${esc(h.title)}" placeholder="Hazard, e.g. Fire" aria-label="Hazard">${sel(`assessment_hazards|${h.id}|category`, h.category, CATS, '')}<button class="btn sm ghost" data-act="delHz" data-id="${h.id}">Remove</button></div>
+  <div style="margin-top:10px">${area(`assessment_hazards|${h.id}|description`, h.description, 'Description')}</div>${ctlBlock(a, h)}${hzMeta(a, h)}</div>`).join('')
+    : empty('No hazards yet', 'Pick the hazards for this activity — for example Fire, Slips, trips and falls, Manual handling — from your hazard register, or add your own.', '<button class="btn pri" data-act="hzPick">+ Add hazards from register</button>')}
+  ${gen.length ? `<div class="hz"><div class="hzh" style="grid-template-columns:auto minmax(0,1fr)"><span class="hn">+</span><b style="font-size:16px">General controls <span class="muted" style="font-weight:400">— apply to the whole activity</span></b></div>${ctlBlock(a, null)}</div>` : hz.length ? '<p class="hint"><a href="#" data-act="ctlNew" data-h="">+ Add a general control</a> that applies to the whole activity.</p>' : ''}
+  ${hz.length ? `<p class="hint">Next: set the <a href="#/ra/${a.id}/rating">risk rating</a> without and with controls.</p>` : ''}`;
 }
 function tRating(a) {
   return `${ratingCard(a)}<div class="g2" style="margin-top:16px"><div class="panel"><h3 style="font-size:16px;margin-bottom:10px">Without controls</h3>${picker(a, 'init', 'pick')}</div><div class="panel"><h3 style="font-size:16px;margin-bottom:10px">With controls</h3>${picker(a, 'res', 'pick')}</div></div>
   <p class="hint">Score = likelihood × severity. 1–4 low, 5–9 medium, 10–16 high, 20–25 very high.</p>`;
 }
+function actionModal(a, hid) {
+  const h = hid ? byId('assessment_hazards', hid) : null, r = h ? (h.risk_l || 0) * (h.risk_s || 0) : 0;
+  openModal(`<h3>Raise an action${h ? ` — ${esc(h.title || 'hazard')}` : ''}</h3><div class="g2"><label class="full">What needs doing<textarea id="ac-t" style="min-height:70px" placeholder="e.g. Fit splash guards to both fryers"></textarea></label>
+  <label>Owner<input id="ac-o" placeholder="Name"></label><label>Due date<input id="ac-d" type="date" value="${addDays(today(), r >= 10 ? 7 : 30)}"></label>
+  <label>Priority<select id="ac-p">${PRI.map((p) => `<option${p === (r >= 20 ? 'Urgent' : r >= 10 ? 'High' : 'Medium') ? ' selected' : ''}>${p}</option>`).join('')}</select></label>
+  <label>Hazard<select id="ac-h"><option value="">General</option>${raHz(a.id).map((x) => `<option value="${x.id}"${x.id === hid ? ' selected' : ''}>${esc(x.title || 'Untitled hazard')}</option>`).join('')}</select></label></div>
+  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="actSave">Raise action</button></div>`);
+}
+function tSummary(a) {
+  const k = ctlScore(raCtl(a.id)), now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  return `<div class="panel"><h3 style="font-size:16px;margin-bottom:10px">Summary</h3>${area(`assessments|${a.id}|summary`, a.summary, 'Comments')}
+  <p class="hint">Score ${pct(k)} · ${k.f} control${k.f === 1 ? '' : 's'} not in place · ${raActs(a.id).filter((x) => x.status !== 'Done').length} open actions.</p></div>
+  <div class="panel"><div class="sect"><h3>Approval</h3>${a.approved_at ? '<span class="tag ok">Complete</span>' : '<span class="tag warn">Incomplete</span>'}</div>
+  ${a.approved_at ? `<div class="g2"><div><span class="muted">Approved by</span><br><b>${esc(a.approved_by)}</b></div><div><span class="muted">Date and time of approval</span><br><b>${ft(a.approved_at)}</b></div>
+  <div class="full"><span class="muted">Approver's signature</span><br>${a.approval_signature ? `<img src="${esc(a.approval_signature)}" alt="Approver's signature" style="max-width:320px;border:1px solid var(--line);border-radius:6px;background:#fff">` : '—'}</div></div>
+  <div class="row" style="margin-top:12px"><button class="btn sm" data-act="unapprove">Remove approval</button><span class="muted">Remove it to change and approve again.</span></div>`
+    : `<div class="g2"><label>Approver's name<input id="ap-by" value="${esc(S.me.full_name || '')}"></label><label>Date and time of approval<input id="ap-at" type="datetime-local" value="${now}"></label></div>
+  <label style="margin-top:12px">Approver's signature<canvas class="sigpad" id="sg-pad" aria-label="Signature pad"></canvas></label>
+  <div class="row" style="margin-top:8px"><button class="btn sm" type="button" id="sg-clear">Clear signature</button><button class="btn pri sp" data-act="approve">Approve assessment</button></div>`}</div>
+  <p class="hint">Approval marks the assessment Complete on the PDF. Publishing to the client is separate — see <a href="#/ra/${a.id}/publish">Publish and sign-offs</a>.</p>`;
+}
 function tActions(a) {
   const list = raActs(a.id).sort((x, y) => (x.status === 'Done') - (y.status === 'Done') || String(x.due_date || '9').localeCompare(String(y.due_date || '9')));
-  const copts = [['', '—']].concat(raCtl(a.id).map((c) => [c.id, c.title.slice(0, 40) || 'Untitled control']));
+  const copts = [['', '—']].concat(raCtl(a.id).map((c) => { const h = byId('assessment_hazards', c.assessment_hazard_id); return [c.id, ((h ? h.title + ': ' : '') + (c.title || 'Untitled control')).slice(0, 60)]; }));
+  const hopts = [['', 'General']].concat(raHz(a.id).map((h) => [h.id, (h.title || 'Untitled hazard').slice(0, 40)]));
   return `<div class="sect"><h2>Actions</h2><button class="btn pri" data-act="addAct">+ Add action</button></div>
-  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Action</th><th>Control</th><th>Owner</th><th>Due</th><th>Priority</th><th>Status</th><th></th></tr></thead><tbody>${list.map((x) => `<tr class="${isOd(x) ? 'od' : ''}"><td data-l="Action" style="min-width:220px"><input id="a-${x.id}-t" data-b="actions|${x.id}|title" value="${esc(x.title)}" placeholder="What needs doing" aria-label="Action"></td>
+  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Action</th><th>Hazard</th><th>Control</th><th>Owner</th><th>Due</th><th>Priority</th><th>Status</th><th></th></tr></thead><tbody>${list.map((x) => `<tr class="${isOd(x) ? 'od' : ''}"><td data-l="Action" style="min-width:220px"><input id="a-${x.id}-t" data-b="actions|${x.id}|title" value="${esc(x.title)}" placeholder="What needs doing" aria-label="Action"></td><td data-l="Hazard">${sel(`actions|${x.id}|assessment_hazard_id`, x.assessment_hazard_id || '', hopts, '')}</td>
   <td data-l="Control">${sel(`actions|${x.id}|assessment_control_id`, x.assessment_control_id || '', copts, '')}</td><td data-l="Owner"><input id="a-${x.id}-o" data-b="actions|${x.id}|owner" value="${esc(x.owner)}" aria-label="Owner"></td>
   <td data-l="Due"><input id="a-${x.id}-d" type="date" data-b="actions|${x.id}|due_date" value="${esc(x.due_date)}" aria-label="Due">${isOd(x) ? '<span class="od-t">Overdue</span>' : ''}</td><td data-l="Priority">${sel(`actions|${x.id}|priority`, x.priority, PRI, '')}</td>
   <td data-l="Status">${sel(`actions|${x.id}|status`, x.status, ASTAT, '')}${x.completed_on ? `<div class="muted">Done ${fd(x.completed_on)}</div>` : ''}</td><td><button class="btn sm ghost" data-act="delAct" data-id="${x.id}" aria-label="Delete action">✕</button></td></tr>`).join('')}</tbody></table></div><p class="hint">The client can see the live status of these actions in their portal.</p>`
@@ -318,16 +366,40 @@ function tHistory(a) {
 }
 
 // pick from registers
-function pickModal(kind, a) {
-  const isHz = kind === 'hz', reg = rows(isHz ? 'hazard_register' : 'control_register').filter((r) => r.active);
-  const have = new Set((isHz ? raHz(a.id) : raCtl(a.id)).map((x) => x.register_id));
-  const groups = {}; reg.forEach((r) => (groups[isHz ? r.category : r.type] ||= []).push(r));
-  openModal(`<h3>Add from ${isHz ? 'hazard' : 'control'} register</h3><input id="pk-q" type="search" placeholder="Search…" style="margin-bottom:10px">
-  <div class="pick" id="pk-list">${Object.keys(groups).sort().map((g) => `<div class="cat">${esc(g)}</div>${groups[g].sort((x, y) => x.title.localeCompare(y.title)).map((r) => `<label class="opt" data-txt="${esc((r.title + ' ' + (r.description || '')).toLowerCase())}"><input type="checkbox" value="${r.id}"${have.has(r.id) ? ' checked disabled' : ''}><span><b>${esc(r.title)}</b>${have.has(r.id) ? ' <span class="muted">(added)</span>' : ''}<br><span class="muted">${esc(r.description || '')}</span></span></label>`).join('')}`).join('') || '<p class="muted" style="padding:12px">The register is empty. Add entries on the register page.</p>'}</div>
-  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="${isHz ? 'hzPickSave' : 'ctlPickSave'}">Add selected</button></div>`, true);
+function pickModal(kind, a, hid) {
+  const isHz = kind === 'hz', h = hid ? byId('assessment_hazards', hid) : null, reg = rows(isHz ? 'hazard_register' : 'control_register').filter((r) => r.active);
+  const have = new Set((isHz ? raHz(a.id) : hzCtl(a.id, hid)).map((x) => x.register_id));
+  const sugIds = new Set(!isHz && h?.register_id ? rows('hazard_register_controls').filter((l) => l.hazard_id === h.register_id).map((l) => l.control_id) : []);
+  const groups = {}; reg.forEach((r) => (groups[isHz ? r.category : sugIds.has(r.id) ? ' Suggested for this hazard' : r.type] ||= []).push(r));
+  openModal(`<h3>${isHz ? 'Add hazards from the hazard register' : `Choose controls${h ? ` for “${esc(h.title || 'this hazard')}”` : ' (general)'}`}</h3><input id="pk-q" type="search" placeholder="Search…" style="margin-bottom:10px">
+  <div class="pick" id="pk-list">${Object.keys(groups).sort().map((g) => `<div class="cat">${esc(g.trim())}</div>${groups[g].sort((x, y) => x.title.localeCompare(y.title)).map((r) => `<label class="opt" data-txt="${esc((r.title + ' ' + (r.description || '')).toLowerCase())}"><input type="checkbox" value="${r.id}"${have.has(r.id) ? ' checked disabled' : ''}><span><b>${esc(r.title)}</b>${have.has(r.id) ? ' <span class="muted">(added)</span>' : ''}<br><span class="muted">${esc(r.description || '')}</span></span></label>`).join('')}`).join('') || '<p class="muted" style="padding:12px">The register is empty. Add entries on the register page.</p>'}</div>
+  <div class="ft">${isHz ? '' : `<button class="btn" data-act="ctlNew" data-h="${hid || ''}" style="margin-right:auto">+ Create a new control instead</button>`}<button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="${isHz ? 'hzPickSave' : 'ctlPickSave'}" data-h="${hid || ''}">Add selected</button></div>`, true);
   $('#pk-q').oninput = (e) => { const q = e.target.value.toLowerCase(); document.querySelectorAll('#pk-list .opt').forEach((o) => (o.style.display = o.dataset.txt.includes(q) ? '' : 'none')); };
 }
-const addCtlFromReg = (a, r, i = 0) => ins('assessment_controls', { assessment_id: a.id, register_id: r.id, title: r.title, description: r.description, type: r.type, state: 'In place', sort: raCtl(a.id).length + i });
+function ctlNewModal(a, hid) {
+  const h = hid ? byId('assessment_hazards', hid) : null;
+  openModal(`<h3>Create a control${h ? ` for “${esc(h.title || 'this hazard')}”` : ' (general)'}</h3><div class="g2"><label class="full">Control measure<input id="cn-t" placeholder="e.g. Fire extinguishers checked monthly"></label>
+  <label>Type<select id="cn-y">${CTYPES.map((t) => `<option${t === 'Administrative' ? ' selected' : ''}>${t}</option>`).join('')}</select></label><label>Status<select id="cn-s"><option value="In place">Yes — in place</option><option value="Planned">No — not in place</option><option value="N/A">N/A</option></select></label>
+  <label class="full">Description (optional)<textarea id="cn-d"></textarea></label>
+  <label class="chk full"><input type="checkbox" id="cn-reg" checked> Also save to the control register${h?.register_id ? ' and suggest it for this hazard next time' : ''}</label></div>
+  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="ctlNewSave" data-h="${hid || ''}">Add control</button></div>`);
+}
+async function ctlNewSave(a, hid) {
+  const title = $('#cn-t').value.trim(); if (!title) return toast('Enter the control measure', true);
+  const type = $('#cn-y').value, state = $('#cn-s').value, description = $('#cn-d').value.trim() || null, toReg = $('#cn-reg').checked, h = hid ? byId('assessment_hazards', hid) : null;
+  closeModal();
+  let register_id = null;
+  try {
+    if (toReg) {
+      register_id = uid(); await ins('control_register', { id: register_id, title, type, description });
+      if (h?.register_id) { const row = { hazard_id: h.register_id, control_id: register_id }; rows('hazard_register_controls').push(row); queue(() => sb.from('hazard_register_controls').insert(row)).catch(() => {}); }
+    }
+    await ins('assessment_controls', { assessment_id: a.id, assessment_hazard_id: hid || null, register_id, title, type, description, state, sort: raCtl(a.id).length });
+    toast(toReg ? 'Control added and saved to the register' : 'Control added');
+  } catch (e) { /* shown */ }
+  window.__render();
+}
+const addCtlFromReg = (a, r, i = 0, hid = null) => ins('assessment_controls', { assessment_id: a.id, assessment_hazard_id: hid || null, register_id: r.id, title: r.title, description: r.description, type: r.type, state: 'In place', sort: raCtl(a.id).length + i });
 
 // ---------- topic library ----------
 const tHz = (id) => rows('topic_hazards').filter((l) => l.topic_id === id).sort((a, b) => a.sort - b.sort);
@@ -447,6 +519,7 @@ function vTeam() {
 // ---------- events ----------
 export async function adminClick(e, b) {
   const d = b.dataset, aid = route[0] === 'ra' ? route[1] : null, a = aid && byId('assessments', aid);
+  if (d.act && d.act.startsWith('cc') && (await ccClick(d, b))) return;
   switch (d.act) {
     case 'close': return closeModal();
     case 'copy': try { await navigator.clipboard.writeText(d.v); toast('Copied'); } catch { toast('Copy failed', true); } return;
@@ -480,16 +553,31 @@ export async function adminClick(e, b) {
       return window.__render();
     }
     case 'hzCustom': { const id = uid(); ins('assessment_hazards', { id, assessment_id: a.id, title: '', category: 'Other', sort: raHz(a.id).length }).catch(() => {}); window.__render(); return $(`#h-${id}-t`)?.focus(); }
-    case 'delHz': if (await confirmBox('Remove this hazard from the assessment?', 'Remove')) { await del('assessment_hazards', d.id).catch(() => {}); window.__render(); } return;
-    case 'ctlPick': return pickModal('ctl', a);
-    case 'ctlPickSave': { const ids = [...document.querySelectorAll('#pk-list input:checked:not(:disabled)')].map((i) => i.value); closeModal(); ids.forEach((rid, i) => addCtlFromReg(a, byId('control_register', rid), i).catch(() => {})); return window.__render(); }
-    case 'ctlAddReg': addCtlFromReg(a, byId('control_register', d.id)).catch(() => {}); return window.__render();
-    case 'ctlAddAll': suggestedControls(a).forEach((r, i) => addCtlFromReg(a, r, i).catch(() => {})); return window.__render();
-    case 'ctlCustom': { const id = uid(); ins('assessment_controls', { id, assessment_id: a.id, title: '', type: 'Administrative', state: 'In place', sort: raCtl(a.id).length }).catch(() => {}); window.__render(); return $(`#c-${id}-t`)?.focus(); }
+    case 'delHz': if (await confirmBox('Remove this hazard and its controls from the assessment?', 'Remove')) { await del('assessment_hazards', d.id).catch(() => {}); D.assessment_controls = rows('assessment_controls').filter((c) => c.assessment_hazard_id !== d.id); window.__render(); } return;
+    case 'ctlPick': return pickModal('ctl', a, d.h);
+    case 'ctlPickSave': { const ids = [...document.querySelectorAll('#pk-list input:checked:not(:disabled)')].map((i) => i.value); closeModal(); ids.forEach((rid, i) => addCtlFromReg(a, byId('control_register', rid), i, d.h).catch(() => {})); return window.__render(); }
+    case 'ctlAddReg': addCtlFromReg(a, byId('control_register', d.id), 0, d.h).catch(() => {}); return window.__render();
+    case 'ctlAddAll': { const h = byId('assessment_hazards', d.h); if (h) suggestedFor(a, h).forEach((r, i) => addCtlFromReg(a, r, i, h.id).catch(() => {})); return window.__render(); }
+    case 'ctlNew': return ctlNewModal(a, d.h);
+    case 'hzPpl': { const h = byId('assessment_hazards', d.h), set = new Set(h.people_affected || []); set.has(d.v) ? set.delete(d.v) : set.add(d.v); upd('assessment_hazards', h.id, { people_affected: [...set] }).catch(() => {}); return window.__render(); }
+    case 'approve': {
+      const by = $('#ap-by').value.trim(), at = $('#ap-at').value;
+      if (by.length < 2) return toast('Enter the approver\'s name', true);
+      if (window.__pad.isEmpty()) return toast('Please sign in the box', true);
+      await upd('assessments', a.id, { approved_by: by, approved_at: at ? new Date(at).toISOString() : nowIso(), approval_signature: window.__pad.toDataURL(), ...(a.status === 'Draft' ? { status: 'Active' } : {}) }).catch(() => {});
+      toast('Assessment approved'); return window.__render();
+    }
+    case 'unapprove': if (await confirmBox('Remove the approval? The assessment will show as Incomplete until it is approved again.', 'Remove approval')) { await upd('assessments', a.id, { approved_by: null, approved_at: null, approval_signature: null }).catch(() => {}); window.__render(); } return;
+    case 'ctlNewSave': return ctlNewSave(a, d.h);
     case 'delCtl': if (await confirmBox('Remove this control from the assessment?', 'Remove')) { await del('assessment_controls', d.id).catch(() => {}); window.__render(); } return;
-    case 'ctlAct': { const c = byId('assessment_controls', d.id), r = scoreOf(a, 'res') || scoreOf(a, 'init'); await ins('actions', { assessment_id: a.id, assessment_control_id: c.id, source: 'control', title: c.title || 'Put control in place', due_date: addDays(today(), r >= 10 ? 7 : 30), priority: r >= 20 ? 'Urgent' : r >= 10 ? 'High' : 'Medium', status: 'Open' }).catch(() => {}); toast('Action created'); return window.__render(); }
+    case 'ctlAct': { const c = byId('assessment_controls', d.id), r = scoreOf(a, 'res') || scoreOf(a, 'init'); await ins('actions', { assessment_id: a.id, assessment_control_id: c.id, assessment_hazard_id: c.assessment_hazard_id || null, source: 'control', title: c.title || 'Put control in place', due_date: addDays(today(), r >= 10 ? 7 : 30), priority: r >= 20 ? 'Urgent' : r >= 10 ? 'High' : 'Medium', status: 'Open' }).catch(() => {}); toast('Action created'); return window.__render(); }
     case 'pick': upd('assessments', a.id, { [d.w + '_l']: +d.l, [d.w + '_s']: +d.s }); return window.__render();
-    case 'addAct': ins('actions', { assessment_id: a.id, title: '', source: 'manual', due_date: addDays(today(), 30), priority: 'Medium', status: 'Open' }).catch(() => {}); return window.__render();
+    case 'addAct': return actionModal(a, d.h);
+    case 'actSave': {
+      const title = $('#ac-t').value.trim(); if (!title) return toast('Describe what needs doing', true);
+      const row = { assessment_id: a.id, assessment_hazard_id: $('#ac-h').value || null, title, owner: $('#ac-o').value.trim() || null, due_date: $('#ac-d').value || null, priority: $('#ac-p').value, source: 'manual', status: 'Open' };
+      closeModal(); await ins('actions', row).catch(() => {}); toast('Action raised'); return window.__render();
+    }
     case 'delAct': if (await confirmBox('Delete this action?')) { await del('actions', d.id).catch(() => {}); window.__render(); } return;
     case 'af': S.af = d.v; return window.__render();
     case 'auStart': S.draft = { ra: a.id, auditor: S.me.full_name || '', date: today(), summary: '', next: addDays(today(), 365), items: QS.map((q) => ({ q, a: '', note: '', act: '' })) }; return window.__render();
@@ -538,7 +626,7 @@ async function refreshProfiles() { D.profiles = await fetchAll('profiles'); }
 async function exportRA(a) {
   const { data: sg } = await sb.from('acknowledgements').select('id,signature').eq('assessment_id', a.id);
   const sigs = Object.fromEntries((sg || []).map((r) => [r.id, r.signature]));
-  assessmentPDF({ ...a, client: cName(a.client_id), site: sName(a.site_id), people: a.people_exposed || [], hazards: raHz(a.id), controls: raCtl(a.id),
+  assessmentPDF({ ...a, client: cName(a.client_id), site: sName(a.site_id), siteAddress: byId('sites', a.site_id)?.address, people: a.people_exposed || [], hazards: raHz(a.id).map((h) => ({ ...h, controls: hzCtl(a.id, h.id), actions: raActs(a.id).filter((x) => x.assessment_hazard_id === h.id) })), controls: raCtl(a.id).filter((c) => !c.assessment_hazard_id || !raHz(a.id).some((h) => h.id === c.assessment_hazard_id)),
     versionLabel: a.published_version ? `Working copy · last published as version ${a.published_version}` : 'Working copy · not yet published',
     actions: raActs(a.id), audits: rows('audits').filter((u) => u.assessment_id === a.id), acks: raAcks(a.id).map((k) => ({ ...k, signature: sigs[k.id] })) });
 }
@@ -549,7 +637,7 @@ export function adminField(el, isChange) {
   if (el.dataset.so) { S.so[el.dataset.so] = el.value; if (el.dataset.so === 'c') { S.so.s = ''; S.so.a = ''; } return true; }
   if (el.dataset.au != null && S.draft) { const k = el.dataset.au; if (k[0] === 'n' && /^n\d+$/.test(k)) S.draft.items[+k.slice(1)].note = el.value; else S.draft[k] = el.value; return false; }
   const [t, id, f] = (el.dataset.b || '').split('|'); if (!t) return false;
-  let v = el.type === 'checkbox' ? el.checked : el.value;
+  let v = el.type === 'checkbox' ? el.checked : el.type === 'number' ? (el.value === '' ? null : +el.value) : el.value;
   if (v === '' && (f.endsWith('_id') || el.type === 'date')) v = null;
   const patch = { [f]: v };
   if (t === 'actions' && f === 'status') patch.completed_on = v === 'Done' ? today() : null;
