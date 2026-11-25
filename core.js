@@ -212,7 +212,7 @@ export const svg = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentC
 
 // Shell with sidebar.
 export function shell({ nav, active, title, me, body, right = '' }) {
-  return `<div class="shell"><aside><img class="lg" src="assets/logo-dark-bg.png" alt="${esc(COMPANY)} — Safety made easy">
+  return `<div class="shell"><aside><img class="lg" src="logo-dark-bg.png" alt="${esc(COMPANY)} — Safety made easy">
   <div class="grp">${esc(me.group)}</div><div class="navs">${nav.map((n) => `<a class="nv${n.k === active ? ' on' : ''}" href="#/${n.href}">${svg(n.icon)}${esc(n.label)}${n.c ? `<span class="c">${n.c}</span>` : ''}</a>`).join('')}</div>
   <div class="me"><b>${esc(me.name)}</b><span>${esc(me.sub)}</span><br><button data-act="signout">Sign out</button></div></aside>
   <div><div class="topbar"><h1>${esc(title)}</h1>${right}<span class="sv" id="sv">All changes saved</span></div>${body}</div></div>`;
