@@ -15,7 +15,7 @@ Security is enforced by the database itself (Postgres row-level security), not b
 | --- | --- |
 | `index.html`, `styles.css`, `*.js`, `*.png` | The web app. Plain static files: no build step. (`supabase.js`, `jspdf*.js` are bundled libraries.) |
 | `config.js` | Your Supabase URL and public key go here. |
-| `schema.sql` | Database tables, security rules, triggers and functions. |
+| `schema.sql`, `hardening.sql` | Database tables, security rules, triggers and functions. |
 | `seed.sql` | The Safetybiz starter library: 184 topics, 70 hazards, 317 controls. |
 | `topic-library.csv`, `registers.csv` | The library as spreadsheets, for review. |
 
@@ -23,9 +23,10 @@ Security is enforced by the database itself (Postgres row-level security), not b
 
 ### 1. Create the Supabase project
 1. Sign up at [supabase.com](https://supabase.com) and create a new project (choose the London region for UK data).
-2. Open **SQL Editor → New query**, paste the whole of `schema.sql` and press **Run**.
-3. New query again: paste `seed.sql` and **Run** to load the Safetybiz library.
-4. Add yourself as the first administrator (new query, change the email and name):
+2. Open **SQL Editor → New query**, paste the whole of `schema.sql` and press **Run**. If Supabase warns about tables without Row Level Security, choose **Run without RLS**: the script switches it on for every table further down.
+3. New query: paste `hardening.sql` and **Run**.
+4. New query again: paste `seed.sql` and **Run** to load the Safetybiz library.
+5. Add yourself as the first administrator (new query, change the email and name):
    ```sql
    insert into public.portal_invites (email, role, full_name)
    values ('you@safetybiz.co.uk', 'admin', 'Your Name');
