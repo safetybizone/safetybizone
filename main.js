@@ -4,6 +4,7 @@ import { loadAdmin, adminView, adminClick, adminField } from './admin.js';
 import { loadPortal, portalView, portalClick, portalField } from './portal.js';
 
 let me = null, ready = false;
+const builder = () => me.role === 'admin' || me.role === 'client_admin'; // Safetybiz admins and company administrators use the builder
 const root = $('#root');
 const route = () => location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
 
@@ -11,7 +12,7 @@ function render() {
   if (!ready || !me) return;
   const ae = document.activeElement, fid = ae && ae.id, ss = ae && ae.selectionStart;
   const y = window.scrollY;
-  root.innerHTML = me.role === 'admin' ? adminView(route()) : portalView(route());
+  root.innerHTML = builder() ? adminView(route()) : portalView(route());
   setSaveEl($('#sv'));
   if (root.querySelector('#sg-pad')) mountPad();
   if (fid) { const e = document.getElementById(fid); if (e && !$('#modal').contains(e)) { e.focus({ preventScroll: true }); try { if (ss != null && isText(e)) e.setSelectionRange(ss, ss); } catch { /* not text */ } } }
@@ -51,7 +52,7 @@ async function start(session) {
   me = data || { id: session.user.id, email: session.user.email, role: 'none' };
   if (me.role === 'none') return noAccessView();
   root.innerHTML = '<div class="boot"><img src="logo-light-bg.png" alt="" width="220"><p>Loading your data…</p></div>';
-  try { me.role === 'admin' ? await loadAdmin(me) : await loadPortal(me); }
+  try { builder() ? await loadAdmin(me) : await loadPortal(me); }
   catch (e) { root.innerHTML = `<div class="boot"><p>Couldn't load data: ${esc(e.message)}</p></div>`; return; }
   ready = true; render();
 }
@@ -64,13 +65,13 @@ document.addEventListener('click', async (e) => {
   if (b.dataset.act === 'signout') { await sb.auth.signOut(); location.hash = ''; return; }
   if (b.tagName !== 'INPUT') e.preventDefault();
   if (!me) return;
-  if (me.role === 'admin') await adminClick(e, b); else await portalClick(e, b);
+  if (builder()) await adminClick(e, b); else await portalClick(e, b);
 });
 const onField = (e, isChange) => {
   const el = e.target; if (!me || !el.dataset) return;
   if (!(el.dataset.b || el.dataset.ui || el.dataset.so || el.dataset.au != null || el.dataset.f || el.dataset.st)) return;
   if (isChange === isText(el)) return; // text boxes save on input, others on change
-  const re = me.role === 'admin' ? adminField(el, isChange) : portalField(el, isChange);
+  const re = builder() ? adminField(el, isChange) : portalField(el, isChange);
   if (re) render();
 };
 document.addEventListener('input', (e) => onField(e, false));

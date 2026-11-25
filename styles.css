@@ -203,3 +203,9 @@ tr.od td{background:#fff4f2}
 .chipbtn.on{background:var(--teal);border-color:var(--teal);color:#fff}
 .tag.miss{border-style:dashed;color:var(--mute)}
 @media(max-width:700px){.hzm{grid-template-columns:minmax(0,1fr)}}
+
+/* selection and bulk copy */
+th.ck,td.ck{width:40px;padding-right:0}
+tr.on td{background:#fff7f3}
+.bulk{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--teal);color:#fff;border-radius:10px;padding:8px 12px;margin-bottom:10px;position:sticky;top:72px;z-index:4}
+.bulk .btn.ghost{color:#fff}
