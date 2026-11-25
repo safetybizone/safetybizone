@@ -39,7 +39,13 @@ function noAccessView() {
 }
 
 async function start(session) {
-  if (!session) { me = null; ready = false; return loginView(); }
+  if (!session) {
+    me = null; ready = false;
+    const h = new URLSearchParams(location.hash.replace(/^#/, ''));
+    const err = h.get('error_description');
+    if (err) history.replaceState(null, '', location.pathname);
+    return loginView(err ? (/expired|invalid/i.test(err) ? 'That sign-in link has expired or was already used. Each link works once — enter your email for a new one and use the newest email.' : esc(err)) : undefined);
+  }
   const { data, error } = await sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
   if (error) { root.innerHTML = `<div class="boot"><p>Couldn't load your profile: ${esc(error.message)}</p></div>`; return; }
   me = data || { id: session.user.id, email: session.user.email, role: 'none' };
