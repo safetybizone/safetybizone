@@ -108,7 +108,7 @@ tr.od td{background:#fff4f2}
 .ax{font-size:11px;color:var(--mute);display:grid;place-items:center}
 .axn{display:flex;justify-content:space-between;font-size:11px;color:var(--mute);width:211px;margin-top:3px}
 .res{margin-top:8px;font-size:13px;color:var(--mute)}
-.ctl{display:grid;grid-template-columns:140px minmax(0,1fr) 118px auto auto;gap:6px;margin-bottom:6px;align-items:center}
+.ctl{display:grid;grid-template-columns:140px minmax(0,1fr) 160px auto auto;gap:6px;margin-bottom:6px;align-items:center}
 .ctl input,.ctl select{min-height:36px;padding:5px 8px;font-size:14px}
 .linked{font-size:12.5px;color:#1f7d6d;font-weight:600;white-space:nowrap}
 .sugg{background:var(--soft);border-radius:8px;padding:10px;margin:8px 0}
@@ -193,3 +193,13 @@ tr.od td{background:#fff4f2}
   .stack td[data-l]::before{content:attr(data-l);display:block;font-size:11.5px;color:var(--mute);font-weight:600}
 }
 @media print{aside,.topbar,.tabs,.btn{display:none!important}.shell{display:block}body{background:#fff}}
+
+/* hazard sections (controls, risk score, persons affected, actions under each hazard) */
+.hzc{margin-top:14px;border-top:1px dashed var(--line);padding-top:12px}
+.cbox{background:#fafcfb;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px}
+.hzm{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:14px 24px;margin-top:14px;border-top:1px dashed var(--line);padding-top:12px}
+.hzm h4{font-size:14px;margin-bottom:6px}.hzm .full{grid-column:1/-1}
+.hzm select{min-height:36px;padding:5px 8px;font-size:14px}
+.chipbtn.on{background:var(--teal);border-color:var(--teal);color:#fff}
+.tag.miss{border-style:dashed;color:var(--mute)}
+@media(max-width:700px){.hzm{grid-template-columns:minmax(0,1fr)}}

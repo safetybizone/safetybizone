@@ -1,5 +1,5 @@
 // Sign-in, routing and event wiring.
-import { sb, $, esc, toast, isText, COMPANY, PORTAL, setSaveEl, mountPad } from './core.js';
+import { sb, $, esc, toast, isText, COMPANY, PORTAL, setSaveEl, mountPad, closeModal } from './core.js';
 import { loadAdmin, adminView, adminClick, adminField } from './admin.js';
 import { loadPortal, portalView, portalClick, portalField } from './portal.js';
 
@@ -75,7 +75,7 @@ const onField = (e, isChange) => {
 };
 document.addEventListener('input', (e) => onField(e, false));
 document.addEventListener('change', (e) => onField(e, true));
-window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
+window.addEventListener('hashchange', () => { closeModal(); render(); window.scrollTo(0, 0); });
 
 sb.auth.onAuthStateChange((ev, session) => {
   if (ev === 'SIGNED_IN' && me && session && me.id === session.user.id) return; // already loaded
