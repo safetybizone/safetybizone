@@ -19,7 +19,7 @@ export const nowIso = () => new Date().toISOString();
 export const LIK = ['Rare', 'Unlikely', 'Possible', 'Likely', 'Almost certain'];
 export const SEV = ['Negligible', 'Minor', 'Moderate', 'Major', 'Catastrophic'];
 export const CTYPES = ['Elimination', 'Substitution', 'Engineering', 'Administrative', 'PPE'];
-export const CATS = ['Slips, trips and falls', 'Working at height', 'Manual handling', 'Machinery and equipment', 'Electrical', 'Hazardous substances (COSHH)', 'Fire', 'Vehicles and traffic', 'Noise and vibration', 'Lone working', 'Stress and wellbeing', 'Asbestos', 'Confined spaces', 'Gas', 'Water and flooding', 'Food safety', 'Violence and aggression', 'Other'];
+export const CATS = ['Slips, trips and falls', 'Working at height', 'Manual handling', 'Machinery and equipment', 'Electrical', 'Hazardous substances (COSHH)', 'Fire', 'Vehicles and traffic', 'Noise and vibration', 'Lone working', 'Stress and wellbeing', 'Asbestos', 'Confined spaces', 'Gas', 'Water and flooding', 'Food safety', 'Violence and aggression', 'Health', 'Vulnerable people', 'Public and visitors', 'Construction', 'Working outdoors', 'Radiation', 'Animals', 'Events', 'Other'];
 export const PEOPLE = ['Colleagues', 'Contractors', 'Visitors / guests', 'Members of the public', 'Customers', 'Young workers', 'New or expectant mothers', 'Lone workers', 'People with disabilities', 'Service users / residents', 'Patients', 'Children', 'Pupils / students'];
 export const STATUSES = ['Draft', 'Active', 'Under review', 'Archived'];
 export const ASTAT = ['Open', 'In progress', 'Done'];

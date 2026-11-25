@@ -3,7 +3,8 @@
 The Safetybiz risk assessment platform and client portal.
 
 - **Safetybiz administrators** onboard clients (head office and sites), build risk assessments from the Safetybiz topic library and the hazard and control registers, rate risk on a 5×5 matrix, raise actions, run audits, publish to the client portal and keep every record.
-- **Client managers** see every published risk assessment for their company, add their own staff, collect sign-offs (online or in person on a tablet) and export the acknowledgement record.
+- **Superadmins** (Safetybiz) can also add and remove administrators, delete clients and edit the topic library.
+- **Company administrators** are linked to one client company. They build, edit and publish that company's risk assessments, add sites and staff, keep certificates, collect sign-offs (online or in person on a tablet) and export the acknowledgement record. They never see another company.
 - **Client staff** see the assessments for their site, read them and sign.
 - PDF export of full risk assessments (laid out like the familiar printed format) and of sign-off records with signatures.
 
@@ -18,6 +19,7 @@ Security is enforced by the database itself (Postgres row-level security), not b
 | `schema.sql`, `hardening.sql` | Database tables, security rules, triggers and functions. |
 | `migration-002-hazard-sections.sql` | Hazard sections: controls, risk score, people affected and actions per hazard; summary and signed approval. |
 | `migration-003-compliance-centre.sql` | Compliance centre: certificate types, site documents and the private `compliance` file store. |
+| `migration-004-roles-and-copy.sql` | Superadmins, and company administrators who build their own company's assessments. |
 | `seed.sql` | The Safetybiz starter library: 184 topics, 70 hazards, 317 controls. |
 | `topic-library.csv`, `registers.csv` | The library as spreadsheets, for review. |
 
@@ -26,14 +28,14 @@ Security is enforced by the database itself (Postgres row-level security), not b
 ### 1. Create the Supabase project
 1. Sign up at [supabase.com](https://supabase.com) and create a new project (choose the London region for UK data).
 2. Open **SQL Editor → New query**, paste the whole of `schema.sql` and press **Run**. If Supabase warns about tables without Row Level Security, choose **Run without RLS**: the script switches it on for every table further down.
-3. New query: paste `hardening.sql` and **Run**. Then do the same with `migration-002-hazard-sections.sql` and `migration-003-compliance-centre.sql`, in that order.
+3. New query: paste `hardening.sql` and **Run**. Then do the same with `migration-002-hazard-sections.sql`, `migration-003-compliance-centre.sql` and `migration-004-roles-and-copy.sql`, in that order.
 4. New query again: paste `seed.sql` and **Run** to load the Safetybiz library.
 5. Add yourself as the first administrator (new query, change the email and name):
    ```sql
    insert into public.portal_invites (email, role, full_name)
    values ('you@safetybiz.co.uk', 'admin', 'Your Name');
    ```
-   Only emails listed as invites get access. You add everyone else from inside the app.
+   Only emails listed as invites get access. The first administrator becomes the superadmin when `migration-004-roles-and-copy.sql` runs (or run it after you have signed in once). You add everyone else from inside the app.
 
 ### 2. Configure sign-in
 In Supabase: **Authentication → URL Configuration**
