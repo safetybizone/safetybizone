@@ -16,6 +16,8 @@ Security is enforced by the database itself (Postgres row-level security), not b
 | `index.html`, `styles.css`, `*.js`, `*.png` | The web app. Plain static files: no build step. (`supabase.js`, `jspdf*.js` are bundled libraries.) |
 | `config.js` | Your Supabase URL and public key go here. |
 | `schema.sql`, `hardening.sql` | Database tables, security rules, triggers and functions. |
+| `migration-002-hazard-sections.sql` | Hazard sections: controls, risk score, people affected and actions per hazard; summary and signed approval. |
+| `migration-003-compliance-centre.sql` | Compliance centre: certificate types, site documents and the private `compliance` file store. |
 | `seed.sql` | The Safetybiz starter library: 184 topics, 70 hazards, 317 controls. |
 | `topic-library.csv`, `registers.csv` | The library as spreadsheets, for review. |
 
@@ -24,7 +26,7 @@ Security is enforced by the database itself (Postgres row-level security), not b
 ### 1. Create the Supabase project
 1. Sign up at [supabase.com](https://supabase.com) and create a new project (choose the London region for UK data).
 2. Open **SQL Editor → New query**, paste the whole of `schema.sql` and press **Run**. If Supabase warns about tables without Row Level Security, choose **Run without RLS**: the script switches it on for every table further down.
-3. New query: paste `hardening.sql` and **Run**.
+3. New query: paste `hardening.sql` and **Run**. Then do the same with `migration-002-hazard-sections.sql` and `migration-003-compliance-centre.sql`, in that order.
 4. New query again: paste `seed.sql` and **Run** to load the Safetybiz library.
 5. Add yourself as the first administrator (new query, change the email and name):
    ```sql

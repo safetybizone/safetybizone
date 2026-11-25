@@ -3,7 +3,8 @@ import {
   sb, D, $, esc, uid, today, fd, ft, chip, scoreOf, isOd, ratingCard, toast, openModal, closeModal, confirmBox,
   fetchAll, rows, byId, ins, upd, del, niceError, shell, signFormHTML, mountPad, submitSignOff,
 } from './core.js';
-import { assessmentPDF, signOffsPDF } from './pdf.js';
+import { assessmentPDF, signOffsPDF, ctlScore, pct } from './pdf.js';
+import { ccView, ccClick } from './compliance.js';
 
 const S = { me: null, sigs: {}, f: {}, viewed: {} };
 let route = [];
@@ -13,9 +14,9 @@ export async function loadPortal(me) {
   S.me = me;
   const ackCols = 'id,assessment_id,version,user_id,email,full_name,job_title,method,site_id,statement,acknowledged_at';
   const tasks = [fetchAll('clients'), fetchAll('sites'), fetchAll('published_assessments'), fetchAll('actions'), fetchAll('acknowledgements', ackCols)];
-  if (me.role === 'client_admin') tasks.push(fetchAll('portal_invites'), fetchAll('profiles'));
-  const [clients, sites, pubs, actions, acks, invites = [], profiles = []] = await Promise.all(tasks);
-  Object.assign(D, { clients, sites, published_assessments: pubs, actions, acknowledgements: acks, portal_invites: invites, profiles });
+  if (me.role === 'client_admin') tasks.push(fetchAll('portal_invites'), fetchAll('profiles'), fetchAll('compliance_doc_types'), fetchAll('site_documents'));
+  const [clients, sites, pubs, actions, acks, invites = [], profiles = [], cdt = [], sdocs = []] = await Promise.all(tasks);
+  Object.assign(D, { clients, sites, published_assessments: pubs, actions, acknowledgements: acks, portal_invites: invites, profiles, compliance_doc_types: cdt, site_documents: sdocs });
 }
 
 // latest published version of each assessment
@@ -36,11 +37,12 @@ export function portalView(r) {
   route = r;
   const L = latest(), todo = L.filter((a) => !mySigned(a)).length;
   const nav = [{ k: 'home', href: '', icon: 'ra', label: isMgr() ? 'Risk assessments' : 'My risk assessments', c: todo || '' }];
-  if (isMgr()) nav.push({ k: 'records', href: 'records', icon: 'sign', label: 'Sign-off records' }, { k: 'staff', href: 'staff', icon: 'staff', label: 'Staff' });
+  if (isMgr()) nav.push({ k: 'compliance', href: 'compliance', icon: 'cert', label: 'Compliance centre' }, { k: 'records', href: 'records', icon: 'sign', label: 'Sign-off records' }, { k: 'staff', href: 'staff', icon: 'staff', label: 'Staff' });
   let active = 'home', title = isMgr() ? 'Risk assessments' : 'My risk assessments', body;
   if (r[0] === 'a') { title = 'Risk assessment'; body = vAssessment(r[1]); }
   else if (r[0] === 'records' && isMgr()) { active = 'records'; title = 'Sign-off records'; body = vRecords(); }
   else if (r[0] === 'staff' && isMgr()) { active = 'staff'; title = 'Staff'; body = vStaff(); }
+  else if (r[0] === 'compliance' && isMgr()) { active = 'compliance'; title = 'Compliance centre'; body = ccView(r, { admin: false, base: 'compliance' }); }
   else body = vHome(L);
   return shell({ nav, active, title, body, me: { group: company().toUpperCase(), name: S.me.full_name || S.me.email, sub: isMgr() ? 'Manager' : (S.me.job_title || 'Staff') } });
 }
@@ -64,7 +66,7 @@ function card(a) {
   const acts = rows('actions').filter((x) => x.assessment_id === a.id && x.status !== 'Done').length;
   return `<a class="pcard" href="#/a/${a.id}"><div class="row" style="justify-content:space-between;align-items:flex-start"><b style="font-size:16px">${esc(a.title || 'Untitled')}</b>${signed ? '<span class="tag ok">Signed</span>' : '<span class="tag warn">To sign</span>'}</div>
   <div class="muted" style="margin:4px 0 10px">Version ${a.version} · ${fd(a.published_at)} · renewal ${fd(a.review_date)}</div>
-  <div class="row">${chip(scoreOf(a, 'res'))}<span class="muted">with ${(a.snap.controls || []).length} controls</span>${acts ? `<span class="tag">${acts} open action${acts > 1 ? 's' : ''}</span>` : ''}</div>
+  <div class="row">${chip(scoreOf(a, 'res'))}<span class="muted">with ${(a.snap.hazards || []).reduce((n, h) => n + (h.controls || []).length, 0) + (a.snap.controls || []).length} controls</span>${acts ? `<span class="tag">${acts} open action${acts > 1 ? 's' : ''}</span>` : ''}</div>
   ${isMgr() && aud.length ? `<div class="row" style="margin-top:12px"><div class="prog" style="flex:1"><i style="width:${Math.round((n / aud.length) * 100)}%"></i></div><span class="muted">${n} of ${aud.length} portal users signed</span></div>` : ''}</a>`;
 }
 
@@ -81,13 +83,18 @@ function vAssessment(id) {
   <div class="meta" style="margin:6px 0 12px"><span>${esc(sn.client?.name || '')} · ${esc(sn.site?.name || '')}</span><b style="color:var(--ink)">Version ${a.version}</b><span>Published ${fd(a.published_at)}</span><span>Renewal ${fd(a.review_date)}</span><span>${esc(a.ref)}</span></div>
   ${a.description ? `<p style="max-width:72ch;margin:0 0 16px">${esc(a.description)}</p>` : ''}${ratingCard(a)}</div>
   <div class="panel"><h3 style="font-size:16px;margin-bottom:10px">People exposed</h3><div class="row">${(a.people_exposed || []).map((p) => `<span class="tag">${esc(p)}</span>`).join('') || '<span class="muted">Not specified</span>'}</div></div>
-  <div class="panel"><h3 style="font-size:16px;margin-bottom:6px">Hazards</h3>${(sn.hazards || []).map((h) => `<div class="li"><span class="rc rc-hi" aria-hidden="true">!</span><span><b>${esc(h.title)}</b>${h.description ? `<br><span>${esc(h.description)}</span>` : ''}</span></div>`).join('') || '<p class="muted">None listed.</p>'}</div>
-  <div class="panel"><h3 style="font-size:16px;margin-bottom:6px">Control measures</h3>${(sn.controls || []).map((c) => `<div class="li"><span class="tag ${c.state === 'Planned' ? 'warn' : 'ok'}">${c.state === 'Planned' ? 'Planned' : 'In place'}</span><span><b>${esc(c.title)}</b> <span class="muted">· ${esc(c.type)}</span>${c.description ? `<br><span>${esc(c.description)}</span>` : ''}</span></div>`).join('') || '<p class="muted">None listed.</p>'}</div>
+  ${(sn.hazards || []).map((h, i) => { const sc = ctlScore(h.controls || []), rs = (h.risk_l || 0) * (h.risk_s || 0), ha = acts.filter((x) => x.assessment_hazard_id === h.id);
+    return `<div class="panel"><div class="sect" style="margin-bottom:6px"><h3><span class="hn" style="font-size:13px;padding:4px 8px;margin-right:6px">${i + 1}</span>${esc(h.title)}</h3><span class="muted">${pct(sc)}</span></div>${h.description ? `<p style="margin:0 0 8px">${esc(h.description)}</p>` : ''}
+    ${(h.controls || []).map((c) => ctlLine(c)).join('') || '<p class="muted">No control measures listed.</p>'}
+    <div class="g3" style="margin-top:10px"><div><span class="muted">Risk score</span><br>${chip(rs)}</div><div><span class="muted">Person affected</span><br>${esc((h.people_affected || []).join(', ') || '—')}</div><div><span class="muted">Actions</span><br>${ha.length ? ha.map((x) => `${esc(x.title)} <span class="tag ${x.status === 'Done' ? 'ok' : isOd(x) ? 'bad' : ''}">${esc(x.status)}</span>`).join('<br>') : 'None'}</div></div></div>`; }).join('') || '<div class="panel"><p class="muted">No hazards listed.</p></div>'}
+  ${(sn.controls || []).length ? `<div class="panel"><h3 style="font-size:16px;margin-bottom:6px">General controls</h3>${sn.controls.map((c) => ctlLine(c)).join('')}</div>` : ''}
   ${acts.length ? `<div class="panel"><h3 style="font-size:16px;margin-bottom:10px">Actions</h3><div class="tw"><table class="stack"><thead><tr><th>Action</th><th>Owner</th><th>Due</th><th>Status</th></tr></thead><tbody>${acts.map((x) => `<tr class="${isOd(x) ? 'od' : ''}"><td data-l="Action">${esc(x.title)}</td><td data-l="Owner">${esc(x.owner || '—')}</td><td data-l="Due">${fd(x.due_date)}</td><td data-l="Status"><span class="tag ${x.status === 'Done' ? 'ok' : isOd(x) ? 'bad' : ''}">${esc(x.status)}${isOd(x) ? ' · overdue' : ''}</span></td></tr>`).join('')}</tbody></table></div></div>` : ''}
+  ${a.summary || a.approved_at ? `<div class="panel"><h3 style="font-size:16px;margin-bottom:8px">Summary and approval</h3>${a.summary ? `<p style="margin:0 0 10px">${esc(a.summary)}</p>` : ''}${a.approved_at ? `<p class="muted" style="margin:0">Approved by <b>${esc(a.approved_by)}</b> on ${ft(a.approved_at)}</p>${a.approval_signature && String(a.approval_signature).startsWith('data:image/') ? `<img src="${esc(a.approval_signature)}" alt="Approver's signature" style="max-width:260px;margin-top:6px;border:1px solid var(--line);border-radius:6px;background:#fff">` : ''}` : ''}</div>` : ''}
   <div class="panel" id="sign"><h3 style="font-size:16px;margin-bottom:10px">Acknowledgement</h3>
   ${signed ? `<p><span class="tag ok">Signed</span> You signed version ${a.version} on ${ft(signed.acknowledged_at)}.</p>` : `${signFormHTML({ version: a.version, method: 'Own account', name: S.me.full_name || '', job: S.me.job_title || '' })}<div class="row" style="margin-top:14px"><button class="btn pri" data-act="sign" data-id="${id}">Sign and submit</button></div>`}
   ${isMgr() ? `<div class="sect" style="margin-top:22px"><h3>Sign-off record</h3><button class="btn sm" data-act="inPerson" data-id="${id}">Record in-person sign-off</button></div>${whoSigned(a)}${ackRows(acks, S.sigs[id] || {})}` : acks.length ? `<h4 style="margin:18px 0 6px">Your sign-offs</h4>${ackRows(acks, {})}` : ''}</div></div>`;
 }
+const ctlLine = (c) => `<div class="li"><span class="tag ${c.state === 'Planned' ? 'bad' : c.state === 'N/A' ? '' : 'ok'}">${c.state === 'Planned' ? 'Not in place' : c.state === 'N/A' ? 'N/A' : 'In place'}</span><span><b>${esc(c.title)}</b> <span class="muted">· ${esc(c.type)}</span>${c.description ? `<br><span>${esc(c.description)}</span>` : ''}</span></div>`;
 function whoSigned(a) {
   const aud = audience(a), su = signedUsers(a);
   if (!aud.length) return '';
@@ -138,7 +145,9 @@ function vStaff() {
 }
 
 export async function portalClick(e, b) {
-  const d = b.dataset, a = latest().find((x) => x.id === (d.id || route[1]));
+  const d = b.dataset;
+  if (d.act && d.act.startsWith('cc') && isMgr() && (await ccClick(d, b))) return;
+  const a = latest().find((x) => x.id === (d.id || route[1]));
   switch (d.act) {
     case 'close': return closeModal();
     case 'sign': { const r = await submitSignOff({ assessmentId: a.id, version: a.version, method: 'Own account' }); if (!r) return; delete r.signature; rows('acknowledgements').push(r); delete S.sigs[a.id]; toast('Thank you — your sign-off is recorded'); return window.__render(); }
@@ -147,7 +156,8 @@ export async function portalClick(e, b) {
     case 'pdf': {
       const acks = rows('acknowledgements').filter((k) => k.assessment_id === a.id).sort((x, y) => y.acknowledged_at.localeCompare(x.acknowledged_at));
       const { data } = await sb.from('acknowledgements').select('id,signature').eq('assessment_id', a.id); const sg = Object.fromEntries((data || []).map((r) => [r.id, r.signature]));
-      return assessmentPDF({ ...a, client: a.snap.client?.name || '', site: a.snap.site?.name || '', people: a.people_exposed || [], hazards: a.snap.hazards || [], controls: a.snap.controls || [],
+      const la = rows('actions').filter((x) => x.assessment_id === a.id);
+      return assessmentPDF({ ...a, client: a.snap.client?.name || '', site: a.snap.site?.name || '', siteAddress: a.snap.site?.address || '', people: a.people_exposed || [], hazards: (a.snap.hazards || []).map((h) => ({ ...h, actions: la.filter((x) => x.assessment_hazard_id === h.id) })), controls: a.snap.controls || [],
         versionLabel: `Version ${a.version} · published ${fd(a.published_at)}`, actions: rows('actions').filter((x) => x.assessment_id === a.id), audits: [], acks: acks.map((k) => ({ ...k, signature: sg[k.id] })) });
     }
     case 'ackPdf': case 'recPdf': {
