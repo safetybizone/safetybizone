@@ -1,0 +1,564 @@
+// Admin (your company) side.
+import {
+  sb, D, $, esc, uid, today, addDays, fd, ft, nowIso, band, chip, scoreOf, reduction, isOd, picker, ratingCard,
+  CTYPES, CATS, PEOPLE, STATUSES, ASTAT, PRI, QS, auditScore, auditOutcome, ocol, toast, openModal, closeModal, confirmBox,
+  fetchAll, rows, byId, ins, upd, del, queue, niceError, field, area, sel, shell, signFormHTML, mountPad, submitSignOff, onRerender,
+} from './core.js';
+import { assessmentPDF, signOffsPDF } from './pdf.js';
+
+const S = { me: null, q: '', fClient: '', fStatus: '', af: 'open', draft: null, logs: {}, sigs: {}, hq: '', hcat: '', cq: '', so: {}, tq: '', tsec: '' };
+let route = [];
+
+// ---------- load ----------
+export async function loadAdmin(me) {
+  S.me = me;
+  const ackCols = 'id,assessment_id,version,user_id,email,full_name,job_title,method,site_id,statement,acknowledged_at';
+  const [clients, sites, invites, profiles, hreg, creg, hrc, ras, hz, ctl, acts, audits, pubs, acks, topics, thz, tct] = await Promise.all([
+    fetchAll('clients'), fetchAll('sites'), fetchAll('portal_invites'), fetchAll('profiles'), fetchAll('hazard_register'), fetchAll('control_register'),
+    fetchAll('hazard_register_controls'), fetchAll('assessments'), fetchAll('assessment_hazards'), fetchAll('assessment_controls'), fetchAll('actions'),
+    fetchAll('audits'), fetchAll('published_assessments', 'id,assessment_id,client_id,site_id,version,note,published_at,published_by'), fetchAll('acknowledgements', ackCols),
+    fetchAll('topic_library'), fetchAll('topic_hazards'), fetchAll('topic_controls'),
+  ]);
+  Object.assign(D, { clients, sites, portal_invites: invites, profiles, hazard_register: hreg, control_register: creg, hazard_register_controls: hrc, assessments: ras,
+    assessment_hazards: hz, assessment_controls: ctl, actions: acts, audits, published_assessments: pubs, acknowledgements: acks, topic_library: topics, topic_hazards: thz, topic_controls: tct });
+}
+
+// ---------- lookups ----------
+const cName = (id) => byId('clients', id)?.name || 'Unknown client';
+const sName = (id) => byId('sites', id)?.name || '';
+const clientSites = (cid) => rows('sites').filter((s) => s.client_id === cid).sort((a, b) => (b.is_head_office - a.is_head_office) || a.name.localeCompare(b.name));
+const raHz = (aid) => rows('assessment_hazards').filter((h) => h.assessment_id === aid).sort((a, b) => a.sort - b.sort || a.created_at.localeCompare(b.created_at));
+const raCtl = (aid) => rows('assessment_controls').filter((c) => c.assessment_id === aid).sort((a, b) => a.sort - b.sort || a.created_at.localeCompare(b.created_at));
+const raActs = (aid) => rows('actions').filter((x) => x.assessment_id === aid);
+const raAcks = (aid) => rows('acknowledgements').filter((x) => x.assessment_id === aid).sort((a, b) => b.acknowledged_at.localeCompare(a.acknowledged_at));
+const raPubs = (aid) => rows('published_assessments').filter((x) => x.assessment_id === aid).sort((a, b) => b.version - a.version);
+const live = () => rows('assessments').filter((a) => a.status !== 'Archived');
+const person = (id) => { const p = byId('profiles', id); return p ? p.full_name || p.email : id ? 'Someone' : 'System'; };
+const newRef = () => 'RA-' + today().replace(/-/g, '').slice(2) + '-' + uid().slice(0, 3).toUpperCase();
+const ratingLine = (a) => `${chip(scoreOf(a, 'res'), true)}<div class="muted" style="font-size:12px">with ${raCtl(a.id).length} controls</div>`;
+const pubTag = (a) => (a.published_version ? `<span class="tag ok">Published v${a.published_version}</span>` : '<span class="tag">Not published</span>');
+const statusTag = (s) => `<span class="tag${s === 'Active' ? ' ok' : s === 'Under review' ? ' warn' : ''}">${esc(s)}</span>`;
+const empty = (h, p, btn = '') => `<div class="empty"><h3>${h}</h3><p class="muted">${p}</p>${btn}</div>`;
+
+// people who can see an assessment in the portal
+function audienceFor(a) {
+  return rows('portal_invites').filter((i) => i.client_id === a.client_id && (i.role === 'client_admin' || !i.site_id || i.site_id === a.site_id));
+}
+
+// ---------- view ----------
+export function adminView(r) {
+  route = r;
+  const [p0, p1, p2] = r;
+  const open = rows('actions').filter((x) => x.status !== 'Done').length;
+  const nav = [
+    { k: 'dash', href: '', icon: 'dash', label: 'Dashboard' },
+    { k: 'clients', href: 'clients', icon: 'clients', label: 'Clients and sites', c: rows('clients').length },
+    { k: 'ras', href: 'ras', icon: 'ra', label: 'Risk assessments', c: live().length },
+    { k: 'topics', href: 'topics', icon: 'lib', label: 'Topic library', c: rows('topic_library').filter((t) => t.active).length },
+    { k: 'hazards', href: 'hazards', icon: 'hz', label: 'Hazard register' },
+    { k: 'controls', href: 'controls', icon: 'ctl', label: 'Control register' },
+    { k: 'actions', href: 'actions', icon: 'acts', label: 'Actions', c: open },
+    { k: 'signoffs', href: 'signoffs', icon: 'sign', label: 'Sign-offs' },
+    { k: 'team', href: 'team', icon: 'team', label: 'Team and administrators' },
+  ];
+  let active = 'dash', title = 'Dashboard', body;
+  if (p0 === 'clients') { active = 'clients'; title = 'Clients and sites'; body = vClients(); }
+  else if (p0 === 'client') { active = 'clients'; title = 'Client'; body = vClient(p1); }
+  else if (p0 === 'ras') { active = 'ras'; title = 'Risk assessments'; body = vRAs(); }
+  else if (p0 === 'ra') { active = 'ras'; title = 'Risk assessment'; body = vRA(p1, p2 || 'details'); }
+  else if (p0 === 'topics') { active = 'topics'; title = 'Topic library'; body = vTopics(); }
+  else if (p0 === 'hazards') { active = 'hazards'; title = 'Hazard register'; body = vHazReg(); }
+  else if (p0 === 'controls') { active = 'controls'; title = 'Control register'; body = vCtlReg(); }
+  else if (p0 === 'actions') { active = 'actions'; title = 'Actions'; body = vActions(); }
+  else if (p0 === 'signoffs') { active = 'signoffs'; title = 'Sign-offs'; body = vSignoffs(); }
+  else if (p0 === 'team') { active = 'team'; title = 'Team and administrators'; body = vTeam(); }
+  else body = vDash();
+  return shell({ nav, active, title, body, me: { group: 'RISK MANAGEMENT', name: S.me.full_name || S.me.email, sub: 'Administrator' } });
+}
+
+// ---------- dashboard ----------
+function vDash() {
+  const L = live(), acts = rows('actions').filter((x) => byId('assessments', x.assessment_id)?.status !== 'Archived');
+  const soon = addDays(today(), 30), month = addDays(today(), -30);
+  const od = acts.filter(isOd), due = L.filter((a) => a.review_date && a.review_date <= soon).sort((a, b) => a.review_date.localeCompare(b.review_date));
+  const hi = [...L].filter((a) => scoreOf(a, 'res') || scoreOf(a, 'init')).sort((a, b) => (scoreOf(b, 'res') || scoreOf(b, 'init')) - (scoreOf(a, 'res') || scoreOf(a, 'init'))).slice(0, 6);
+  const recent = [...rows('acknowledgements')].sort((a, b) => b.acknowledged_at.localeCompare(a.acknowledged_at)).slice(0, 6);
+  const st = [[rows('clients').length, 'Clients'], [L.length, 'Live risk assessments'], [L.filter((a) => scoreOf(a, 'res') >= 10).length, 'High risk with controls', 1],
+    [acts.filter((x) => x.status !== 'Done').length, 'Open actions'], [od.length, 'Overdue actions', 1], [due.length, 'Renewals due in 30 days', 1],
+    [rows('acknowledgements').filter((a) => a.acknowledged_at >= month).length, 'Sign-offs in last 30 days']];
+  const st1 = `<div class="stats">${st.map(([n, l, al]) => `<div class="stat${al && n ? ' alert' : ''}"><span>${l}</span><b>${n}</b></div>`).join('')}</div>`;
+  if (!rows('clients').length) return `<div class="page">${st1}${empty('Start by onboarding a client', 'Add the client\'s head office and sites, then create risk assessments for them from your hazard and control registers.', '<button class="btn pri" data-act="onboard">+ Onboard a client</button>')}</div>`;
+  return `<div class="page"><div class="sect"><div><h2>Risk overview</h2><p class="muted" style="margin:4px 0 0">Every client, their highest risks and what needs doing next.</p></div><div class="row"><button class="btn" data-act="onboard">+ Onboard client</button><button class="btn pri" data-act="newRA">+ Create risk assessment</button></div></div>${st1}
+  <div class="g2" style="margin-bottom:18px"><div class="panel"><h3 style="font-size:16px;margin-bottom:8px">Highest risk ratings</h3>${hi.length ? hi.map((a) => `<a class="li" href="#/ra/${a.id}/rating">${chip(scoreOf(a, 'res') || scoreOf(a, 'init'), true)}<span><b>${esc(a.title || 'Untitled')}</b><br><span class="muted">${esc(cName(a.client_id))} · ${esc(sName(a.site_id))}${scoreOf(a, 'res') ? '' : ' · not rated with controls'}</span></span></a>`).join('') : '<p class="muted">Nothing rated yet.</p>'}</div>
+  <div class="panel"><h3 style="font-size:16px;margin-bottom:8px">Needs attention</h3>${od.slice(0, 5).map((x) => { const a = byId('assessments', x.assessment_id); return `<a class="li" href="#/ra/${x.assessment_id}/actions"><span class="tag bad">Overdue</span><span><b>${esc(x.title || 'Untitled action')}</b><br><span class="muted">Due ${fd(x.due_date)} · ${esc(x.owner || 'No owner')} · ${esc(cName(a?.client_id))}</span></span></a>`; }).join('')}
+  ${due.slice(0, 4).map((a) => `<a class="li" href="#/ra/${a.id}/details"><span class="tag warn">Renewal</span><span><b>${esc(a.title || 'Untitled')}</b><br><span class="muted">${a.review_date < today() ? 'Was due' : 'Due'} ${fd(a.review_date)} · ${esc(cName(a.client_id))}</span></span></a>`).join('')}
+  ${L.filter((a) => !a.published_version && a.status === 'Active').slice(0, 3).map((a) => `<a class="li" href="#/ra/${a.id}/publish"><span class="tag">Unpublished</span><span><b>${esc(a.title || 'Untitled')}</b><br><span class="muted">Active but the client can't see it yet</span></span></a>`).join('')}
+  ${!od.length && !due.length ? '<p class="muted">Nothing overdue and no renewals due in the next 30 days.</p>' : ''}</div></div>
+  <div class="panel"><div class="sect"><h3>Latest sign-offs</h3><a class="btn sm" href="#/signoffs">All sign-offs</a></div>${recent.length ? recent.map((k) => { const a = byId('assessments', k.assessment_id); return `<a class="li" href="#/ra/${k.assessment_id}/publish"><span class="tag ok">Signed</span><span><b>${esc(k.full_name)}</b>${k.job_title ? ', ' + esc(k.job_title) : ''}<br><span class="muted">${esc(a?.title || '')} v${k.version} · ${esc(cName(a?.client_id))} · ${ft(k.acknowledged_at)}${k.method === 'In person' ? ' · in person' : ''}</span></span></a>`; }).join('') : '<p class="muted">No sign-offs yet. Publish an assessment and invite the client\'s staff.</p>'}</div></div>`;
+}
+
+// ---------- clients ----------
+function vClients() {
+  const cs = [...rows('clients')].sort((a, b) => a.name.localeCompare(b.name));
+  return `<div class="page"><div class="sect"><h2>Clients</h2><button class="btn pri" data-act="onboard">+ Onboard client</button></div>
+  ${cs.length ? `<div class="tw"><table class="stack"><thead><tr><th>Client</th><th>Head office</th><th>Sites</th><th>Risk assessments</th><th>Portal users</th><th>Open actions</th></tr></thead><tbody>${cs.map((c) => {
+    const ras = rows('assessments').filter((a) => a.client_id === c.id), ho = clientSites(c.id).find((s) => s.is_head_office);
+    return `<tr class="click" data-go="client/${c.id}"><td data-l="Client"><b>${esc(c.name)}</b><br><span class="muted">${esc(c.contact_name || '')}</span></td><td data-l="Head office">${esc(ho?.address || c.address || '—')}</td><td data-l="Sites">${clientSites(c.id).length}</td><td data-l="Risk assessments">${ras.length}</td><td data-l="Portal users">${rows('portal_invites').filter((i) => i.client_id === c.id).length}</td><td data-l="Open actions">${rows('actions').filter((x) => x.status !== 'Done' && ras.some((a) => a.id === x.assessment_id)).length}</td></tr>`;
+  }).join('')}</tbody></table></div>` : empty('No clients yet', 'Onboard a client with their head office, sites and a manager for the portal.', '<button class="btn pri" data-act="onboard">+ Onboard client</button>')}</div>`;
+}
+
+function onboardModal() {
+  openModal(`<h3>Onboard a client</h3><div class="g2">
+  <label class="full">Company name<input id="ob-name" placeholder="e.g. Harbourside Joinery Ltd"></label>
+  <label class="full">Head office address<textarea id="ob-addr" style="min-height:60px"></textarea></label>
+  <label>Contact name<input id="ob-cn"></label><label>Contact email<input id="ob-ce" type="email"></label><label>Phone<input id="ob-ph"></label></div>
+  <h4 style="margin:18px 0 6px">Other sites</h4><p class="hint" style="margin:0 0 6px">A Head office site is added automatically. One site per line: <b>Site name — address</b></p>
+  <textarea id="ob-sites" placeholder="Warehouse — Unit 4, Quay Road&#10;Shop — 12 High Street"></textarea>
+  <h4 style="margin:18px 0 6px">Client manager for the portal (optional)</h4><p class="hint" style="margin:0 0 6px">They can sign in, see every site's published assessments, invite their staff and keep the sign-off records.</p>
+  <div class="g3"><label>Name<input id="ob-mn"></label><label>Email<input id="ob-me" type="email"></label><label>Job title<input id="ob-mj"></label></div>
+  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="onboardSave">Onboard client</button></div>`, true);
+}
+async function onboardSave() {
+  const name = $('#ob-name').value.trim(); if (!name) return toast('Enter the company name', true);
+  const c = { id: uid(), name, address: $('#ob-addr').value.trim() || null, contact_name: $('#ob-cn').value.trim() || null, contact_email: $('#ob-ce').value.trim() || null, phone: $('#ob-ph').value.trim() || null };
+  const siteLines = $('#ob-sites').value || '';
+  const mn = $('#ob-mn').value.trim(), me = $('#ob-me').value.trim().toLowerCase(), mj = $('#ob-mj').value.trim();
+  if (me && !/^\S+@\S+\.\S+$/.test(me)) return toast('Enter a valid manager email', true);
+  closeModal();
+  try {
+    await ins('clients', c);
+    D.sites = rows('sites').concat(await fetchAll('sites', '*', (q) => q.eq('client_id', c.id)));
+    for (const ln of siteLines.split('\n').map((s) => s.trim()).filter(Boolean)) { const [n, ...ad] = ln.split(/\s+[—–-]\s+/); await ins('sites', { client_id: c.id, name: n.trim(), address: ad.join(' - ').trim() || null }); }
+    if (me) await ins('portal_invites', { email: me, role: 'client_admin', client_id: c.id, full_name: mn || null, job_title: mj || null });
+    toast('Client onboarded'); location.hash = '#/client/' + c.id;
+  } catch (e) { /* toast already shown */ }
+}
+
+function vClient(id) {
+  const c = byId('clients', id); if (!c) return `<div class="page">${empty('Client not found', '')}</div>`;
+  const sites = clientSites(id), ras = rows('assessments').filter((a) => a.client_id === id), inv = rows('portal_invites').filter((i) => i.client_id === id);
+  const joined = (email) => rows('profiles').some((p) => p.email === email);
+  const portal = location.origin + location.pathname;
+  return `<div class="page"><a class="btn sm ghost" href="#/clients">← All clients</a>
+  <div class="sect" style="margin-top:8px"><h2>${esc(c.name)}</h2><div class="row"><button class="btn" data-act="newRA" data-client="${id}">+ Create risk assessment</button><button class="btn dng" data-act="delClient" data-id="${id}">Delete client</button></div></div>
+  <div class="panel"><h3 style="font-size:16px;margin-bottom:12px">Head office and contact</h3><div class="g2">${field(`clients|${id}|name`, c.name, 'Company name')}${field(`clients|${id}|contact_name`, c.contact_name, 'Contact name')}${field(`clients|${id}|contact_email`, c.contact_email, 'Contact email', 'email')}${field(`clients|${id}|phone`, c.phone, 'Phone')}${area(`clients|${id}|notes`, c.notes, 'Notes', ' class="full"')}</div></div>
+  <div class="panel"><div class="sect"><h3>Sites</h3><button class="btn sm" data-act="addSite" data-id="${id}">+ Add site</button></div>
+  <div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Address</th><th>Site contact</th><th>Phone</th><th>Assessments</th><th></th></tr></thead><tbody>${sites.map((s) => `<tr><td data-l="Site"><input id="s-${s.id}-n" data-b="sites|${s.id}|name" value="${esc(s.name)}" aria-label="Site name">${s.is_head_office ? '<span class="muted">Head office</span>' : ''}</td><td data-l="Address"><input id="s-${s.id}-a" data-b="sites|${s.id}|address" value="${esc(s.address)}" aria-label="Address"></td><td data-l="Site contact"><input id="s-${s.id}-c" data-b="sites|${s.id}|site_contact" value="${esc(s.site_contact)}" aria-label="Site contact"></td><td data-l="Phone"><input id="s-${s.id}-p" data-b="sites|${s.id}|phone" value="${esc(s.phone)}" aria-label="Phone"></td><td data-l="Assessments">${ras.filter((a) => a.site_id === s.id).length}</td><td>${s.is_head_office ? '' : `<button class="btn sm ghost" data-act="delSite" data-id="${s.id}" aria-label="Remove site">✕</button>`}</td></tr>`).join('')}</tbody></table></div></div>
+  <div class="panel"><div class="sect"><div><h3>Client portal users</h3><p class="hint">Managers see every site and keep the sign-off records. Staff see their site (or all sites) and sign. Portal address: <b>${esc(portal)}</b> <button class="btn sm" data-act="copy" data-v="${esc(portal)}">Copy</button></p></div><button class="btn sm pri" data-act="invite" data-client="${id}">+ Add portal user</button></div>
+  ${inv.length ? `<div class="tw"><table class="stack"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Site</th><th>Job title</th><th>Status</th><th></th></tr></thead><tbody>${inv.map((i) => `<tr><td data-l="Name">${esc(i.full_name || '—')}</td><td data-l="Email">${esc(i.email)}</td><td data-l="Role">${sel(`portal_invites|${i.id}|role`, i.role, [['client_admin', 'Manager'], ['staff', 'Staff']], '')}</td><td data-l="Site">${sel(`portal_invites|${i.id}|site_id`, i.site_id || '', [['', 'All sites']].concat(sites.map((s) => [s.id, s.name])), '')}</td><td data-l="Job title">${esc(i.job_title || '—')}</td><td data-l="Status">${joined(i.email) ? '<span class="tag ok">Joined</span>' : '<span class="tag">Invited</span>'}</td><td><button class="btn sm ghost" data-act="delInvite" data-id="${i.id}" aria-label="Remove access">Remove</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No portal users yet. Add a manager first; they can add their own staff.</p>'}</div>
+  <div class="panel"><div class="sect"><h3>Risk assessments</h3></div>${ras.length ? raTable(ras) : '<p class="muted">None yet.</p>'}</div></div>`;
+}
+function inviteModal(clientId, role = 'staff') {
+  const sites = clientSites(clientId);
+  openModal(`<h3>Add portal user — ${esc(cName(clientId))}</h3><div class="g2"><label>Full name<input id="iv-n"></label><label>Email<input id="iv-e" type="email"></label><label>Job title<input id="iv-j"></label>
+  <label>Role<select id="iv-r"><option value="client_admin"${role === 'client_admin' ? ' selected' : ''}>Manager — all sites, keeps records, invites staff</option><option value="staff"${role === 'staff' ? ' selected' : ''}>Staff — reads and signs</option></select></label>
+  <label class="full">Site<select id="iv-s"><option value="">All sites</option>${sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label></div>
+  <p class="hint">They sign in at the portal address with this email and get a one-time sign-in link. No password needed.</p>
+  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="inviteSave" data-client="${clientId}">Add user</button></div>`);
+}
+
+// ---------- assessments ----------
+function raTable(list) {
+  return `<div class="tw"><table class="stack"><thead><tr><th>Name</th><th>Client · site</th><th>Published</th><th>Status</th><th>Risk rating</th><th>Renewal date</th><th>Sign-offs</th></tr></thead><tbody>${list.map((a) => {
+    const n = raAcks(a.id).filter((k) => k.version === a.published_version).length, aud = a.published_version ? audienceFor(a).length : 0;
+    return `<tr class="click" data-go="ra/${a.id}/details"><td data-l="Name"><a href="#/ra/${a.id}/details"><b>${esc(a.title || 'Untitled')}</b></a><br><span class="muted">${esc(a.ref)}</span></td><td data-l="Client · site">${esc(cName(a.client_id))}<br><span class="muted">${esc(sName(a.site_id))}</span></td><td data-l="Published">${pubTag(a)}</td><td data-l="Status">${statusTag(a.status)}</td><td data-l="Risk rating">${ratingLine(a)}</td><td data-l="Renewal date" class="${a.review_date && a.review_date < today() ? 'od-t' : ''}">${fd(a.review_date)}</td><td data-l="Sign-offs">${a.published_version ? `${n}${aud ? ' of ' + aud : ''} on v${a.published_version}` : '—'}</td></tr>`;
+  }).join('')}</tbody></table></div>`;
+}
+function vRAs() {
+  const q = S.q.toLowerCase();
+  const list = [...rows('assessments')].filter((a) => (!S.fClient || a.client_id === S.fClient) && (!S.fStatus || a.status === S.fStatus) && (!q || [a.title, a.ref, cName(a.client_id), sName(a.site_id)].join(' ').toLowerCase().includes(q)))
+    .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+  return `<div class="page"><div class="panel" style="margin-bottom:16px"><div class="row"><input id="ras-q" type="search" placeholder="Search by name, ref, client or site…" value="${esc(S.q)}" data-ui="q" style="max-width:340px">
+  <select id="ras-c" data-ui="fClient" style="width:auto"><option value="">All clients</option>${rows('clients').map((c) => `<option value="${c.id}"${S.fClient === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+  <select id="ras-s" data-ui="fStatus" style="width:auto"><option value="">All statuses</option>${STATUSES.map((s) => `<option${S.fStatus === s ? ' selected' : ''}>${s}</option>`).join('')}</select>
+  <button class="btn pri sp" data-act="newRA">+ Create risk assessment</button></div></div>
+  <div class="sect"><h2>${list.length} risk assessment${list.length === 1 ? '' : 's'}</h2></div>
+  ${list.length ? raTable(list) : empty(rows('assessments').length ? 'Nothing matches' : 'No risk assessments yet', rows('clients').length ? 'Create one for a client site, then pick hazards and controls from your registers.' : 'Onboard a client first.', rows('clients').length ? '<button class="btn pri" data-act="newRA">+ Create risk assessment</button>' : '<button class="btn pri" data-act="onboard">+ Onboard client</button>')}</div>`;
+}
+function topicOptions(sel) {
+  const g = {}; rows('topic_library').filter((t) => t.active).forEach((t) => (g[t.sector] ||= []).push(t));
+  return Object.keys(g).sort().map((s) => `<optgroup label="Topic library — ${esc(s)}">${g[s].sort((a, b) => a.title.localeCompare(b.title)).map((t) => `<option value="t:${t.id}"${t.id === sel ? ' selected' : ''}>${esc(t.title)}</option>`).join('')}</optgroup>`).join('');
+}
+function newRAModal(clientId, topicId) {
+  if (!rows('clients').length) return onboardModal();
+  const cid = clientId || rows('clients')[0].id;
+  openModal(`<h3>Create risk assessment</h3><div class="g2"><label class="full">Name<input id="nr-t" placeholder="e.g. In house maintenance"></label>
+  <label>Client<select id="nr-c">${rows('clients').map((c) => `<option value="${c.id}"${c.id === cid ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+  <label>Site<select id="nr-s">${clientSites(cid).map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>
+  <label class="full">Start from<select id="nr-from"><option value="">A blank assessment</option>${topicOptions(topicId)}<optgroup label="Copy an existing assessment">${[...rows('assessments')].sort((a, b) => (a.title || '').localeCompare(b.title || '')).map((a) => `<option value="a:${a.id}">${esc(a.title || 'Untitled')} (${esc(cName(a.client_id))} · ${esc(sName(a.site_id))})</option>`).join('')}</optgroup></select></label></div>
+  <p class="hint">A topic brings in its description, people exposed, hazards, controls and ratings for you to adjust. Copying an assessment does the same, without actions, audits or sign-offs.</p>
+  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="newRASave">Create</button></div>`);
+  $('#nr-from').onchange = (e) => { const v = e.target.value; if (!$('#nr-t').value.trim() && v.startsWith('t:')) $('#nr-t').value = byId('topic_library', v.slice(2))?.title || ''; };
+  if (topicId) $('#nr-t').value = byId('topic_library', topicId)?.title || '';
+  $('#nr-c').onchange = (e) => { $('#nr-s').innerHTML = clientSites(e.target.value).map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join(''); };
+}
+async function newRASave() {
+  const fv = $('#nr-from').value, from = fv.startsWith('a:') ? byId('assessments', fv.slice(2)) : fv.startsWith('t:') ? byId('topic_library', fv.slice(2)) : null, isTopic = fv.startsWith('t:');
+  const site = byId('sites', $('#nr-s').value); if (!site) return toast('Choose a site', true);
+  const a = { id: uid(), ref: newRef(), title: $('#nr-t').value.trim() || from?.title || '', client_id: site.client_id, site_id: site.id, status: 'Draft', assessor: S.me.full_name || '', assessment_date: today(), review_date: addDays(today(), 365),
+    topic_id: isTopic ? from.id : from?.topic_id || null, description: from?.description || null, people_exposed: from ? [...from.people_exposed] : ['Colleagues'], init_l: from?.init_l || 0, init_s: from?.init_s || 0, res_l: from?.res_l || 0, res_s: from?.res_s || 0, published_version: 0, updated_at: nowIso() };
+  closeModal();
+  try {
+    await ins('assessments', a);
+    if (from && isTopic) {
+      rows('topic_hazards').filter((l) => l.topic_id === from.id).sort((x, y) => x.sort - y.sort).forEach((l, i) => { const r = byId('hazard_register', l.hazard_id); if (r) ins('assessment_hazards', { assessment_id: a.id, register_id: r.id, title: r.title, category: r.category, description: r.description, sort: i }); });
+      rows('topic_controls').filter((l) => l.topic_id === from.id).sort((x, y) => x.sort - y.sort).forEach((l, i) => { const r = byId('control_register', l.control_id); if (r) ins('assessment_controls', { assessment_id: a.id, register_id: r.id, title: r.title, description: r.description, type: r.type, state: 'In place', sort: i }); });
+    } else if (from) {
+      for (const h of raHz(from.id)) ins('assessment_hazards', { assessment_id: a.id, register_id: h.register_id, title: h.title, category: h.category, description: h.description, sort: h.sort });
+      for (const c of raCtl(from.id)) ins('assessment_controls', { assessment_id: a.id, register_id: c.register_id, title: c.title, description: c.description, type: c.type, state: c.state, sort: c.sort });
+    }
+    location.hash = `#/ra/${a.id}/${from ? 'details' : 'hazards'}`;
+  } catch (e) { /* shown */ }
+}
+
+function vRA(id, tab) {
+  const a = byId('assessments', id); if (!a) return `<div class="page">${empty('Risk assessment not found', '')}</div>`;
+  const tabs = [['details', 'Details'], ['hazards', 'Hazards', raHz(id).length], ['controls', 'Control measures', raCtl(id).length], ['rating', 'Risk rating'], ['actions', 'Actions', raActs(id).filter((x) => x.status !== 'Done').length], ['audits', 'Audits', rows('audits').filter((u) => u.assessment_id === id).length], ['publish', 'Publish and sign-offs', raAcks(id).length], ['history', 'History']];
+  const fn = { details: tDetails, hazards: tHazards, controls: tControls, rating: tRating, actions: tActions, audits: tAudits, publish: tPublish, history: tHistory }[tab] || tDetails;
+  return `<div class="head"><div class="row"><a class="btn sm ghost" href="#/ras">← Risk assessments</a><div class="row sp"><button class="btn sm" data-act="pdf" data-id="${id}">Export PDF</button><button class="btn sm" data-act="dupRA" data-id="${id}">Copy to another site</button><button class="btn sm dng" data-act="delRA" data-id="${id}">Delete</button></div></div>
+  <h2>${esc(a.title || 'Untitled risk assessment')}</h2><div class="meta"><b style="color:var(--ink)">${esc(a.ref)}</b><span>${esc(cName(a.client_id))} · ${esc(sName(a.site_id))}</span>${statusTag(a.status)}${pubTag(a)}<span>With controls ${chip(scoreOf(a, 'res'), true)}</span><span>Renewal <b class="${a.review_date && a.review_date < today() ? 'od-t' : ''}">${fd(a.review_date)}</b></span></div>
+  <nav class="tabs">${tabs.map(([k, l, n]) => `<a href="#/ra/${id}/${k}" class="${tab === k ? 'on' : ''}">${l}${n != null ? `<span class="n">${n}</span>` : ''}</a>`).join('')}</nav></div><div class="page">${fn(a)}</div>`;
+}
+function tDetails(a) {
+  const id = a.id, ppl = a.people_exposed || [], extra = ppl.filter((p) => !PEOPLE.includes(p));
+  return `<div class="panel"><div class="g2">${field(`assessments|${id}|title`, a.title, 'Name of the risk assessment', 'text', ' class="full"')}
+  ${sel(`assessments|${id}|client_id`, a.client_id, rows('clients').map((c) => [c.id, c.name]), 'Client')}${sel(`assessments|${id}|site_id`, a.site_id, clientSites(a.client_id).map((s) => [s.id, s.name]), 'Site')}
+  ${area(`assessments|${id}|description`, a.description, 'Description — what this assessment covers', ' class="full"')}
+  <div class="full"><label>People exposed</label><div class="row" style="margin-top:6px">${PEOPLE.concat(extra).map((p) => `<label class="chk" style="border:1px solid var(--line);border-radius:20px;padding:6px 12px;background:${ppl.includes(p) ? 'var(--soft)' : '#fff'}"><input type="checkbox" data-act="ppl" data-v="${esc(p)}"${ppl.includes(p) ? ' checked' : ''}> ${esc(p)}</label>`).join('')}
+  <input id="ppl-new" placeholder="Add other…" style="width:180px"><button class="btn sm" data-act="pplAdd">Add</button></div></div>
+  ${field(`assessments|${id}|assessor`, a.assessor, 'Assessor')}${sel(`assessments|${id}|status`, a.status, STATUSES, 'Status')}
+  ${field(`assessments|${id}|assessment_date`, a.assessment_date, 'Assessment date', 'date')}${field(`assessments|${id}|review_date`, a.review_date, 'Renewal date', 'date')}
+  ${area(`assessments|${id}|notes`, a.notes, 'Internal notes (not shown to the client)', ' class="full"')}</div></div>
+  <p class="hint">Next: add <a href="#/ra/${id}/hazards">hazards</a> from your register.</p>`;
+}
+function tHazards(a) {
+  const hz = raHz(a.id);
+  return `<div class="sect"><h2>Hazards</h2><div class="row"><button class="btn" data-act="hzCustom">+ Custom hazard</button><button class="btn pri" data-act="hzPick">+ Add from hazard register</button></div></div>
+  ${hz.length ? hz.map((h, i) => `<div class="hz"><div class="hzh"><span class="hn">${i + 1}</span><input class="t" id="h-${h.id}-t" data-b="assessment_hazards|${h.id}|title" value="${esc(h.title)}" placeholder="Hazard, e.g. Electrocution" aria-label="Hazard">${sel(`assessment_hazards|${h.id}|category`, h.category, CATS, '')}<button class="btn sm ghost" data-act="delHz" data-id="${h.id}">Remove</button></div>
+  <div style="margin-top:10px">${area(`assessment_hazards|${h.id}|description`, h.description, 'Description')}</div>${h.register_id ? '<p class="hint">From the hazard register.</p>' : ''}</div>`).join('') + `<p class="hint">Next: choose the <a href="#/ra/${a.id}/controls">control measures</a> — suggestions come from the hazards you picked.</p>`
+    : empty('No hazards yet', 'Pick the hazards that apply to this client from your hazard register, or add your own.', '<button class="btn pri" data-act="hzPick">+ Add from hazard register</button>')}`;
+}
+function suggestedControls(a) {
+  const hzRegIds = raHz(a.id).map((h) => h.register_id).filter(Boolean), have = new Set(raCtl(a.id).map((c) => c.register_id).filter(Boolean));
+  const ids = [...new Set(rows('hazard_register_controls').filter((l) => hzRegIds.includes(l.hazard_id)).map((l) => l.control_id))].filter((cid) => !have.has(cid));
+  return ids.map((cid) => byId('control_register', cid)).filter((c) => c && c.active);
+}
+function tControls(a) {
+  const cs = raCtl(a.id), sug = suggestedControls(a);
+  return `<div class="sect"><h2>Control measures</h2><div class="row"><button class="btn" data-act="ctlCustom">+ Custom control</button><button class="btn pri" data-act="ctlPick">+ Add from control register</button></div></div>
+  ${sug.length ? `<div class="sugg"><div class="row" style="margin-bottom:6px"><b style="font-size:14px">Suggested for these hazards</b><button class="btn sm sp" data-act="ctlAddAll">Add all ${sug.length}</button></div><div class="row">${sug.map((c) => `<button class="chipbtn" data-act="ctlAddReg" data-id="${c.id}">+ ${esc(c.title)}</button>`).join('')}</div></div>` : ''}
+  ${cs.length ? cs.map((c) => { const act = rows('actions').find((x) => x.assessment_control_id === c.id); return `<div class="hz"><div class="ctl">${sel(`assessment_controls|${c.id}|type`, c.type, CTYPES, '')}<input id="c-${c.id}-t" data-b="assessment_controls|${c.id}|title" value="${esc(c.title)}" placeholder="Control measure" aria-label="Control measure">${sel(`assessment_controls|${c.id}|state`, c.state, ['In place', 'Planned'], '')}
+  ${act ? `<a class="linked" href="#/ra/${a.id}/actions">✓ Action ${act.status === 'Done' ? 'done' : act.status.toLowerCase()}</a>` : c.state === 'Planned' ? `<button class="btn sm" data-act="ctlAct" data-id="${c.id}">Create action</button>` : '<span></span>'}<button class="btn sm ghost" data-act="delCtl" data-id="${c.id}" aria-label="Remove control">✕</button></div>
+  <textarea id="c-${c.id}-d" data-b="assessment_controls|${c.id}|description" placeholder="Description" style="min-height:56px">${esc(c.description)}</textarea></div>`; }).join('')
+    : empty('No control measures yet', 'Add the controls that reduce these risks. Mark any not yet in place as Planned and turn them into actions.', '')}
+  <p class="hint">Next: set the <a href="#/ra/${a.id}/rating">risk rating</a> without and with controls.</p>`;
+}
+function tRating(a) {
+  return `${ratingCard(a)}<div class="g2" style="margin-top:16px"><div class="panel"><h3 style="font-size:16px;margin-bottom:10px">Without controls</h3>${picker(a, 'init', 'pick')}</div><div class="panel"><h3 style="font-size:16px;margin-bottom:10px">With controls</h3>${picker(a, 'res', 'pick')}</div></div>
+  <p class="hint">Score = likelihood × severity. 1–4 low, 5–9 medium, 10–16 high, 20–25 very high.</p>`;
+}
+function tActions(a) {
+  const list = raActs(a.id).sort((x, y) => (x.status === 'Done') - (y.status === 'Done') || String(x.due_date || '9').localeCompare(String(y.due_date || '9')));
+  const copts = [['', '—']].concat(raCtl(a.id).map((c) => [c.id, c.title.slice(0, 40) || 'Untitled control']));
+  return `<div class="sect"><h2>Actions</h2><button class="btn pri" data-act="addAct">+ Add action</button></div>
+  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Action</th><th>Control</th><th>Owner</th><th>Due</th><th>Priority</th><th>Status</th><th></th></tr></thead><tbody>${list.map((x) => `<tr class="${isOd(x) ? 'od' : ''}"><td data-l="Action" style="min-width:220px"><input id="a-${x.id}-t" data-b="actions|${x.id}|title" value="${esc(x.title)}" placeholder="What needs doing" aria-label="Action"></td>
+  <td data-l="Control">${sel(`actions|${x.id}|assessment_control_id`, x.assessment_control_id || '', copts, '')}</td><td data-l="Owner"><input id="a-${x.id}-o" data-b="actions|${x.id}|owner" value="${esc(x.owner)}" aria-label="Owner"></td>
+  <td data-l="Due"><input id="a-${x.id}-d" type="date" data-b="actions|${x.id}|due_date" value="${esc(x.due_date)}" aria-label="Due">${isOd(x) ? '<span class="od-t">Overdue</span>' : ''}</td><td data-l="Priority">${sel(`actions|${x.id}|priority`, x.priority, PRI, '')}</td>
+  <td data-l="Status">${sel(`actions|${x.id}|status`, x.status, ASTAT, '')}${x.completed_on ? `<div class="muted">Done ${fd(x.completed_on)}</div>` : ''}</td><td><button class="btn sm ghost" data-act="delAct" data-id="${x.id}" aria-label="Delete action">✕</button></td></tr>`).join('')}</tbody></table></div><p class="hint">The client can see the live status of these actions in their portal.</p>`
+    : empty('No actions', 'Add actions here, from a planned control, or from an audit finding.', '')}`;
+}
+function tAudits(a) {
+  const d = S.draft && S.draft.ra === a.id ? S.draft : null, list = rows('audits').filter((u) => u.assessment_id === a.id).sort((x, y) => y.created_at.localeCompare(x.created_at));
+  if (d) {
+    const p = auditScore(d.items);
+    return `<div class="sect"><h2>New audit</h2><div class="row"><button class="btn" data-act="auDiscard">Discard</button><button class="btn pri" data-act="auComplete">Complete audit</button></div></div>
+    <div class="panel"><div class="score"><b style="color:${p == null ? 'inherit' : ocol(p)}">${p == null ? '—' : p + '%'}</b><span>${auditOutcome(p)} · ${d.items.filter((i) => i.a).length} of ${d.items.length} answered</span></div>
+    <div class="g2"><label>Auditor<input id="au-auditor" data-au="auditor" value="${esc(d.auditor)}"></label><label>Audit date<input id="au-date" type="date" data-au="date" value="${esc(d.date)}"></label></div>
+    ${d.items.map((it, i) => `<div class="aq"><span><b>${i + 1}.</b> ${esc(it.q)}</span><div class="seg">${['Yes', 'Partial', 'No', 'N/A'].map((v) => `<button class="${it.a === v ? 'on' : ''}" data-act="auAns" data-i="${i}" data-v="${v}">${v}</button>`).join('')}</div>
+    ${it.a === 'No' || it.a === 'Partial' ? `<div class="nt"><input id="au-n${i}" data-au="n${i}" value="${esc(it.note)}" placeholder="Finding — what was wrong?">${it.act ? '<span class="linked">✓ Action raised</span>' : `<button class="btn sm" data-act="auRaise" data-i="${i}">Raise action</button>`}</div>` : ''}</div>`).join('')}
+    <div class="g2" style="margin-top:14px"><label class="full">Summary<textarea id="au-sum" data-au="summary">${esc(d.summary)}</textarea></label><label>Set next renewal date<input id="au-next" type="date" data-au="next" value="${esc(d.next)}"></label></div>
+    <p class="hint">Saved when you press Complete audit. Completed audits can't be changed.</p></div>`;
+  }
+  return `<div class="sect"><h2>Audits</h2><button class="btn pri" data-act="auStart">+ Start audit</button></div>
+  ${list.length ? list.map((u) => `<details class="panel"><summary style="cursor:pointer;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><b style="font-size:22px;color:${ocol(u.score)}">${u.score}%</b><b>${esc(u.outcome)}</b><span class="muted">${fd(u.audit_date)} · ${esc(u.auditor || person(u.created_by))}</span></summary>${u.summary ? `<p>${esc(u.summary)}</p>` : ''}<ul>${(u.items || []).map((it) => `<li>${esc(it.q)} — <b>${esc(it.a || 'Not answered')}</b>${it.note ? ': ' + esc(it.note) : ''}</li>`).join('')}</ul></details>`).join('')
+    : empty('No audits yet', 'Audit the assessment on site against a checklist and get a score.', '')}`;
+}
+function tPublish(a) {
+  const pubs = raPubs(a.id), acks = raAcks(a.id), aud = audienceFor(a), cur = a.published_version;
+  const signedBy = new Set(acks.filter((k) => k.version === cur && k.method === 'Own account').map((k) => k.user_id));
+  const prof = (email) => rows('profiles').find((p) => p.email === email);
+  if (!S.sigs[a.id]) loadSigs(a.id);
+  return `<div class="g2"><div class="panel"><h3 style="font-size:16px;margin-bottom:8px">Publish to the client portal</h3>
+  <p class="muted" style="margin-top:0">${cur ? `The client can see <b>version ${cur}</b>, published ${ft(pubs[0]?.published_at)}. After changes, publish a new version — staff will be asked to sign again.` : 'Not published yet. The client sees nothing until you publish.'}</p>
+  <label>Note for this version (optional)<input id="pub-note" placeholder="e.g. Added lone working controls"></label>
+  <div class="row" style="margin-top:12px"><button class="btn pri" data-act="publish" data-id="${a.id}">${cur ? 'Publish version ' + (cur + 1) : 'Publish version 1'}</button>${a.status === 'Draft' ? '<span class="muted">Status will change to Active.</span>' : ''}</div>
+  ${pubs.length ? `<h4 style="margin:16px 0 6px">Versions</h4>${pubs.map((p) => `<div class="li"><span class="tag ok">v${p.version}</span><span>${ft(p.published_at)} · ${esc(person(p.published_by))}${p.note ? '<br><span class="muted">' + esc(p.note) + '</span>' : ''}</span></div>`).join('')}` : ''}</div>
+  <div class="panel"><div class="sect"><h3>Who has signed version ${cur || '–'}</h3><button class="btn sm" data-act="invite" data-client="${a.client_id}">+ Portal user</button></div>
+  ${aud.length ? aud.map((i) => { const p = prof(i.email), ok = p && signedBy.has(p.id); return `<div class="li">${ok ? '<span class="tag ok">Signed</span>' : cur ? '<span class="tag warn">Not yet</span>' : '<span class="tag">—</span>'}<span><b>${esc(i.full_name || i.email)}</b> · ${i.role === 'client_admin' ? 'Manager' : 'Staff'}<br><span class="muted">${esc(i.email)}${p ? '' : ' · hasn\'t signed in yet'}</span></span></div>`; }).join('') : '<p class="muted">No portal users can see this site yet. Add them on the client page.</p>'}
+  <p class="hint">In-person sign-offs appear in the record below.</p></div></div>
+  <div class="panel"><div class="sect"><h3>Acknowledgement record</h3><div class="row">${cur ? `<button class="btn sm" data-act="signInPerson" data-id="${a.id}">Record in-person sign-off</button>` : ''}<button class="btn sm" data-act="ackPdf" data-id="${a.id}">Export sign-offs PDF</button></div></div>
+  ${acks.length ? ackTable(acks, S.sigs[a.id] || {}) : '<p class="muted">No sign-offs yet.</p>'}</div>`;
+}
+function ackTable(acks, sigs, showRA) {
+  return `<div class="tw"><table class="stack"><thead><tr><th>Signed</th><th>Name</th><th>Job title</th>${showRA ? '<th>Assessment</th><th>Client · site</th>' : ''}<th>Version</th><th>Method</th><th>Signature</th></tr></thead><tbody>${acks.map((k) => { const a = byId('assessments', k.assessment_id); return `<tr><td data-l="Signed">${ft(k.acknowledged_at)}</td><td data-l="Name"><b>${esc(k.full_name)}</b><br><span class="muted">${esc(k.email || '')}</span></td><td data-l="Job title">${esc(k.job_title || '—')}</td>${showRA ? `<td data-l="Assessment"><a href="#/ra/${k.assessment_id}/publish">${esc(a?.title || '')}</a></td><td data-l="Client · site">${esc(cName(a?.client_id))} · ${esc(sName(k.site_id))}</td>` : ''}<td data-l="Version">v${k.version}</td><td data-l="Method">${esc(k.method)}${k.method === 'In person' ? `<br><span class="muted">by ${esc(person(k.user_id))}</span>` : ''}</td><td data-l="Signature">${sigs[k.id] ? `<img class="sig" src="${esc(sigs[k.id])}" alt="Signature of ${esc(k.full_name)}">` : ''}</td></tr>`; }).join('')}</tbody></table></div>`;
+}
+async function loadSigs(aid) {
+  S.sigs[aid] = {};
+  const { data } = await sb.from('acknowledgements').select('id,signature').eq('assessment_id', aid);
+  (data || []).forEach((r) => (S.sigs[aid][r.id] = r.signature && r.signature.startsWith('data:image/') ? r.signature : ''));
+  if (route[0] === 'ra' && route[1] === aid) window.__render();
+}
+function tHistory(a) {
+  if (!S.logs[a.id]) {
+    S.logs[a.id] = 'loading';
+    sb.from('activity_log').select('*').eq('assessment_id', a.id).order('created_at', { ascending: false }).limit(500).then(({ data, error }) => { S.logs[a.id] = error ? [] : data; window.__render(); });
+  }
+  const L = S.logs[a.id];
+  return `<div class="sect"><h2>History</h2><button class="btn sm" data-act="reloadLog" data-id="${a.id}">Refresh</button></div><div class="panel log"><ul>${L === 'loading' ? '<li>Loading…</li>' : L.length ? L.map((l) => `<li><span class="muted">${ft(l.created_at)}</span><b>${esc(person(l.user_id))}</b><span>${esc(l.action)}</span></li>`).join('') : '<li>No history yet.</li>'}</ul></div>`;
+}
+
+// pick from registers
+function pickModal(kind, a) {
+  const isHz = kind === 'hz', reg = rows(isHz ? 'hazard_register' : 'control_register').filter((r) => r.active);
+  const have = new Set((isHz ? raHz(a.id) : raCtl(a.id)).map((x) => x.register_id));
+  const groups = {}; reg.forEach((r) => (groups[isHz ? r.category : r.type] ||= []).push(r));
+  openModal(`<h3>Add from ${isHz ? 'hazard' : 'control'} register</h3><input id="pk-q" type="search" placeholder="Search…" style="margin-bottom:10px">
+  <div class="pick" id="pk-list">${Object.keys(groups).sort().map((g) => `<div class="cat">${esc(g)}</div>${groups[g].sort((x, y) => x.title.localeCompare(y.title)).map((r) => `<label class="opt" data-txt="${esc((r.title + ' ' + (r.description || '')).toLowerCase())}"><input type="checkbox" value="${r.id}"${have.has(r.id) ? ' checked disabled' : ''}><span><b>${esc(r.title)}</b>${have.has(r.id) ? ' <span class="muted">(added)</span>' : ''}<br><span class="muted">${esc(r.description || '')}</span></span></label>`).join('')}`).join('') || '<p class="muted" style="padding:12px">The register is empty. Add entries on the register page.</p>'}</div>
+  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="${isHz ? 'hzPickSave' : 'ctlPickSave'}">Add selected</button></div>`, true);
+  $('#pk-q').oninput = (e) => { const q = e.target.value.toLowerCase(); document.querySelectorAll('#pk-list .opt').forEach((o) => (o.style.display = o.dataset.txt.includes(q) ? '' : 'none')); };
+}
+const addCtlFromReg = (a, r, i = 0) => ins('assessment_controls', { assessment_id: a.id, register_id: r.id, title: r.title, description: r.description, type: r.type, state: 'In place', sort: raCtl(a.id).length + i });
+
+// ---------- topic library ----------
+const tHz = (id) => rows('topic_hazards').filter((l) => l.topic_id === id).sort((a, b) => a.sort - b.sort);
+const tCt = (id) => rows('topic_controls').filter((l) => l.topic_id === id).sort((a, b) => a.sort - b.sort);
+function vTopics() {
+  const q = S.tq.toLowerCase(), list = rows('topic_library').filter((t) => (!S.tsec || t.sector === S.tsec) && (!q || (t.title + ' ' + (t.description || '') + ' ' + t.sector).toLowerCase().includes(q)));
+  const secs = [...new Set(rows('topic_library').map((t) => t.sector))].sort(), g = {};
+  list.forEach((t) => (g[t.sector] ||= []).push(t));
+  return `<div class="page"><div class="sect"><div><h2>Topic library</h2><p class="hint">Ready-made Safetybiz risk assessments. Start a client's assessment from a topic, then tailor it to their site.</p></div><button class="btn pri" data-act="tEdit">+ Add topic</button></div>
+  <div class="row" style="margin-bottom:12px"><input id="tq" type="search" data-ui="tq" value="${esc(S.tq)}" placeholder="Search topics…" style="max-width:320px"><select id="tsec" data-ui="tsec" style="width:auto"><option value="">All sectors</option>${secs.map((s) => `<option${S.tsec === s ? ' selected' : ''}>${esc(s)}</option>`).join('')}</select><span class="muted">${list.length} topics</span></div>
+  ${list.length ? Object.keys(g).sort().map((s) => `<h3 style="font-size:16px;margin:18px 0 8px">${esc(s)} <span class="muted">(${g[s].length})</span></h3><div class="tw"><table class="stack"><thead><tr><th>Topic</th><th>Hazards</th><th>Controls</th><th>With controls</th><th>Used</th><th></th></tr></thead><tbody>${g[s].sort((a, b) => a.title.localeCompare(b.title)).map((t) => `<tr class="click" data-act="tEdit" data-id="${t.id}"><td data-l="Topic"><b>${esc(t.title)}</b>${t.active ? '' : ' <span class="tag">Retired</span>'}<br><span class="muted">${esc((t.description || '').slice(0, 140))}</span></td><td data-l="Hazards">${tHz(t.id).length}</td><td data-l="Controls">${tCt(t.id).length}</td><td data-l="With controls">${chip(scoreOf(t, 'res'), true)}</td><td data-l="Used">${rows('assessments').filter((a) => a.topic_id === t.id).length}</td><td><button class="btn sm pri" data-act="newRA" data-topic="${t.id}">Use</button></td></tr>`).join('')}</tbody></table></div>`).join('') : empty('No topics', 'Run seed.sql for the Safetybiz starter library, or add your own.', '')}</div>`;
+}
+function topicModal(id) {
+  const t = id ? byId('topic_library', id) : { title: '', sector: S.tsec || 'General', description: '', people_exposed: ['Colleagues'], init_l: 0, init_s: 0, res_l: 0, res_s: 0, active: true };
+  const hs = new Set(tHz(id).map((l) => l.hazard_id)), cs = new Set(tCt(id).map((l) => l.control_id)), secs = [...new Set(rows('topic_library').map((x) => x.sector))].sort();
+  const num = (k, lbl) => `<label>${lbl}<select id="te-${k}">${[0, 1, 2, 3, 4, 5].map((n) => `<option value="${n}"${+t[k] === n ? ' selected' : ''}>${n || '–'}</option>`).join('')}</select></label>`;
+  const list = (idp, items, have) => `<input type="search" placeholder="Search…" data-filter="${idp}" style="margin-bottom:6px"><div class="pick" id="${idp}" style="max-height:30vh">${items.map((r) => `<label class="opt" data-txt="${esc(r.title.toLowerCase())}"><input type="checkbox" value="${r.id}"${have.has(r.id) ? ' checked' : ''}><span>${esc(r.title)} <span class="muted">· ${esc(r.category || r.type)}</span></span></label>`).join('')}</div>`;
+  openModal(`<h3>${id ? 'Edit topic' : 'Add topic'}</h3><div class="g2"><label class="full">Title<input id="te-t" value="${esc(t.title)}"></label>
+  <label>Sector<input id="te-s" list="te-secs" value="${esc(t.sector)}"><datalist id="te-secs">${secs.map((s) => `<option value="${esc(s)}">`).join('')}</datalist></label><label class="chk" style="align-self:end"><input type="checkbox" id="te-a"${t.active ? ' checked' : ''}> Active</label>
+  <label class="full">Description<textarea id="te-d">${esc(t.description)}</textarea></label>
+  <div class="full"><label>People exposed</label><div class="row" style="margin-top:4px">${PEOPLE.map((p) => `<label class="chk"><input type="checkbox" class="te-p" value="${esc(p)}"${(t.people_exposed || []).includes(p) ? ' checked' : ''}> ${esc(p)}</label>`).join('')}</div></div>
+  <div class="full g3" style="grid-template-columns:repeat(4,minmax(0,1fr))">${num('init_l', 'Likelihood without controls')}${num('init_s', 'Severity without controls')}${num('res_l', 'Likelihood with controls')}${num('res_s', 'Severity with controls')}</div></div>
+  <h4 style="margin:16px 0 6px">Hazards</h4>${list('te-hz', [...rows('hazard_register')].sort((a, b) => a.title.localeCompare(b.title)), hs)}
+  <h4 style="margin:16px 0 6px">Control measures</h4>${list('te-ct', [...rows('control_register')].sort((a, b) => a.title.localeCompare(b.title)), cs)}
+  <div class="ft">${id ? `<button class="btn dng" data-act="tDel" data-id="${id}" style="margin-right:auto">Delete</button>` : ''}<button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="tSave" data-id="${id || ''}">Save topic</button></div>`, true);
+  document.querySelectorAll('[data-filter]').forEach((inp) => (inp.oninput = () => { const q = inp.value.toLowerCase(); document.querySelectorAll('#' + inp.dataset.filter + ' .opt').forEach((o) => (o.style.display = o.dataset.txt.includes(q) ? '' : 'none')); }));
+}
+async function topicSave(id) {
+  const title = $('#te-t').value.trim(); if (!title) return toast('Enter a title', true);
+  const patch = { title, sector: $('#te-s').value.trim() || 'General', description: $('#te-d').value.trim() || null, active: $('#te-a').checked,
+    people_exposed: [...document.querySelectorAll('.te-p:checked')].map((i) => i.value), init_l: +$('#te-init_l').value, init_s: +$('#te-init_s').value, res_l: +$('#te-res_l').value, res_s: +$('#te-res_s').value };
+  const wantH = [...document.querySelectorAll('#te-hz input:checked')].map((i) => i.value), wantC = [...document.querySelectorAll('#te-ct input:checked')].map((i) => i.value);
+  closeModal();
+  if (id) upd('topic_library', id, patch); else { id = uid(); await ins('topic_library', { id, ...patch }).catch(() => {}); }
+  for (const [tbl, key, want] of [['topic_hazards', 'hazard_id', wantH], ['topic_controls', 'control_id', wantC]]) {
+    const have = rows(tbl).filter((l) => l.topic_id === id);
+    for (const l of have) if (!want.includes(l[key])) { D[tbl] = rows(tbl).filter((x) => x !== l); queue(() => sb.from(tbl).delete().eq('topic_id', id).eq(key, l[key])); }
+    want.forEach((v, i) => { if (!have.some((l) => l[key] === v)) { const row = { topic_id: id, [key]: v, sort: have.length + i }; rows(tbl).push(row); queue(() => sb.from(tbl).insert(row)); } });
+  }
+  toast('Topic saved'); window.__render();
+}
+
+// ---------- registers ----------
+function vHazReg() {
+  const q = S.hq.toLowerCase(), list = [...rows('hazard_register')].filter((h) => (!S.hcat || h.category === S.hcat) && (!q || (h.title + ' ' + (h.description || '')).toLowerCase().includes(q))).sort((a, b) => a.category.localeCompare(b.category) || a.title.localeCompare(b.title));
+  return `<div class="page"><div class="sect"><div><h2>Hazard register</h2><p class="hint">Your library of hazards. Pick from it when building a client's assessment. Linked controls are suggested automatically.</p></div><button class="btn pri" data-act="hzEdit">+ Add hazard</button></div>
+  <div class="row" style="margin-bottom:12px"><input id="hq" type="search" data-ui="hq" value="${esc(S.hq)}" placeholder="Search hazards…" style="max-width:320px"><select id="hcat" data-ui="hcat" style="width:auto"><option value="">All categories</option>${CATS.map((c) => `<option${S.hcat === c ? ' selected' : ''}>${c}</option>`).join('')}</select></div>
+  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Hazard</th><th>Category</th><th>Suggested controls</th><th>Used in</th><th>Status</th></tr></thead><tbody>${list.map((h) => `<tr class="click" data-act="hzEdit" data-id="${h.id}"><td data-l="Hazard"><b>${esc(h.title)}</b><br><span class="muted">${esc((h.description || '').slice(0, 120))}</span></td><td data-l="Category">${esc(h.category)}</td><td data-l="Suggested controls">${rows('hazard_register_controls').filter((l) => l.hazard_id === h.id).length}</td><td data-l="Used in">${new Set(rows('assessment_hazards').filter((x) => x.register_id === h.id).map((x) => x.assessment_id)).size} assessments</td><td data-l="Status">${h.active ? '<span class="tag ok">Active</span>' : '<span class="tag">Retired</span>'}</td></tr>`).join('')}</tbody></table></div>` : empty('No hazards', 'Add hazards, or run seed.sql for a starter register.', '')}</div>`;
+}
+function hzEditModal(id) {
+  const h = id ? byId('hazard_register', id) : { title: '', category: 'Other', description: '', active: true };
+  const linked = new Set(rows('hazard_register_controls').filter((l) => l.hazard_id === id).map((l) => l.control_id));
+  openModal(`<h3>${id ? 'Edit hazard' : 'Add hazard'}</h3><div class="g2"><label class="full">Hazard<input id="he-t" value="${esc(h.title)}"></label><label>Category<select id="he-c">${CATS.map((c) => `<option${c === h.category ? ' selected' : ''}>${c}</option>`).join('')}</select></label><label class="chk" style="align-self:end"><input type="checkbox" id="he-a"${h.active ? ' checked' : ''}> Active (shown when picking)</label><label class="full">Description<textarea id="he-d">${esc(h.description)}</textarea></label></div>
+  <h4 style="margin:16px 0 6px">Suggested controls</h4><input id="pk-q" type="search" placeholder="Search controls…" style="margin-bottom:8px"><div class="pick" id="pk-list" style="max-height:34vh">${[...rows('control_register')].sort((a, b) => a.title.localeCompare(b.title)).map((c) => `<label class="opt" data-txt="${esc(c.title.toLowerCase())}"><input type="checkbox" value="${c.id}"${linked.has(c.id) ? ' checked' : ''}><span>${esc(c.title)} <span class="muted">· ${esc(c.type)}</span></span></label>`).join('')}</div>
+  <div class="ft">${id ? `<button class="btn dng" data-act="hzRegDel" data-id="${id}" style="margin-right:auto">Delete</button>` : ''}<button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="hzRegSave" data-id="${id || ''}">Save</button></div>`, true);
+  $('#pk-q').oninput = (e) => { const q = e.target.value.toLowerCase(); document.querySelectorAll('#pk-list .opt').forEach((o) => (o.style.display = o.dataset.txt.includes(q) ? '' : 'none')); };
+}
+async function hzRegSave(id) {
+  const t = $('#he-t').value.trim(); if (!t) return toast('Enter the hazard', true);
+  const patch = { title: t, category: $('#he-c').value, description: $('#he-d').value.trim() || null, active: $('#he-a').checked };
+  const want = new Set([...document.querySelectorAll('#pk-list input:checked')].map((i) => i.value));
+  closeModal();
+  if (id) upd('hazard_register', id, patch); else { id = uid(); await ins('hazard_register', { id, ...patch }); }
+  const have = rows('hazard_register_controls').filter((l) => l.hazard_id === id);
+  for (const l of have) if (!want.has(l.control_id)) { D.hazard_register_controls = rows('hazard_register_controls').filter((x) => x !== l); queue(() => sb.from('hazard_register_controls').delete().eq('hazard_id', id).eq('control_id', l.control_id)); }
+  for (const cid of want) if (!have.some((l) => l.control_id === cid)) { const row = { hazard_id: id, control_id: cid }; rows('hazard_register_controls').push(row); queue(() => sb.from('hazard_register_controls').insert(row)); }
+  window.__render();
+}
+function vCtlReg() {
+  const q = S.cq.toLowerCase(), list = [...rows('control_register')].filter((c) => !q || (c.title + ' ' + (c.description || '')).toLowerCase().includes(q)).sort((a, b) => CTYPES.indexOf(a.type) - CTYPES.indexOf(b.type) || a.title.localeCompare(b.title));
+  return `<div class="page"><div class="sect"><div><h2>Control register</h2><p class="hint">Your library of control measures, ordered by the hierarchy of control.</p></div><button class="btn pri" data-act="ctlEdit">+ Add control</button></div>
+  <input id="cq" type="search" data-ui="cq" value="${esc(S.cq)}" placeholder="Search controls…" style="max-width:320px;margin-bottom:12px">
+  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Control measure</th><th>Type</th><th>Linked hazards</th><th>Used in</th><th>Status</th></tr></thead><tbody>${list.map((c) => `<tr class="click" data-act="ctlEdit" data-id="${c.id}"><td data-l="Control"><b>${esc(c.title)}</b><br><span class="muted">${esc((c.description || '').slice(0, 120))}</span></td><td data-l="Type">${esc(c.type)}</td><td data-l="Linked hazards">${rows('hazard_register_controls').filter((l) => l.control_id === c.id).length}</td><td data-l="Used in">${new Set(rows('assessment_controls').filter((x) => x.register_id === c.id).map((x) => x.assessment_id)).size} assessments</td><td data-l="Status">${c.active ? '<span class="tag ok">Active</span>' : '<span class="tag">Retired</span>'}</td></tr>`).join('')}</tbody></table></div>` : empty('No controls', 'Add control measures, or run seed.sql for a starter register.', '')}</div>`;
+}
+function ctlEditModal(id) {
+  const c = id ? byId('control_register', id) : { title: '', type: 'Administrative', description: '', active: true };
+  openModal(`<h3>${id ? 'Edit control' : 'Add control'}</h3><div class="g2"><label class="full">Control measure<input id="ce-t" value="${esc(c.title)}"></label><label>Type<select id="ce-y">${CTYPES.map((t) => `<option${t === c.type ? ' selected' : ''}>${t}</option>`).join('')}</select></label><label class="chk" style="align-self:end"><input type="checkbox" id="ce-a"${c.active ? ' checked' : ''}> Active</label><label class="full">Description<textarea id="ce-d">${esc(c.description)}</textarea></label></div>
+  <p class="hint">Link it to hazards from the hazard's edit screen.</p><div class="ft">${id ? `<button class="btn dng" data-act="ctlRegDel" data-id="${id}" style="margin-right:auto">Delete</button>` : ''}<button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="ctlRegSave" data-id="${id || ''}">Save</button></div>`);
+}
+
+// ---------- actions / sign-offs / team ----------
+function vActions() {
+  const f = S.af, list = rows('actions').filter((x) => (f === 'all' || (f === 'open' && x.status !== 'Done') || (f === 'overdue' && isOd(x)) || (f === 'done' && x.status === 'Done')) && (!S.fClient || byId('assessments', x.assessment_id)?.client_id === S.fClient))
+    .sort((x, y) => (x.status === 'Done') - (y.status === 'Done') || String(x.due_date || '9').localeCompare(String(y.due_date || '9')));
+  return `<div class="page"><div class="sect"><h2>Actions</h2><div class="row"><select id="af-c" data-ui="fClient" style="width:auto"><option value="">All clients</option>${rows('clients').map((c) => `<option value="${c.id}"${S.fClient === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select><div class="seg">${[['open', 'Open'], ['overdue', 'Overdue'], ['done', 'Done'], ['all', 'All']].map(([k, l]) => `<button class="${f === k ? 'on' : ''}" data-act="af" data-v="${k}">${l}</button>`).join('')}</div></div></div>
+  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Action</th><th>Assessment</th><th>Owner</th><th>Due</th><th>Priority</th><th>Status</th></tr></thead><tbody>${list.map((x) => { const a = byId('assessments', x.assessment_id); return `<tr class="${isOd(x) ? 'od' : ''}"><td data-l="Action"><b>${esc(x.title || 'Untitled')}</b></td><td data-l="Assessment"><a href="#/ra/${x.assessment_id}/actions">${esc(a?.title || '')}</a><br><span class="muted">${esc(cName(a?.client_id))} · ${esc(sName(a?.site_id))}</span></td><td data-l="Owner">${esc(x.owner || '—')}</td><td data-l="Due" class="${isOd(x) ? 'od-t' : ''}">${fd(x.due_date)}</td><td data-l="Priority">${esc(x.priority)}</td><td data-l="Status">${sel(`actions|${x.id}|status`, x.status, ASTAT, '')}</td></tr>`; }).join('')}</tbody></table></div>` : empty('No actions here', 'Actions are raised inside each risk assessment.', '')}</div>`;
+}
+function filteredAcks() {
+  const f = S.so;
+  return [...rows('acknowledgements')].filter((k) => { const a = byId('assessments', k.assessment_id); return a && (!f.c || a.client_id === f.c) && (!f.s || k.site_id === f.s) && (!f.a || a.id === f.a) && (!f.from || k.acknowledged_at.slice(0, 10) >= f.from) && (!f.to || k.acknowledged_at.slice(0, 10) <= f.to); })
+    .sort((a, b) => b.acknowledged_at.localeCompare(a.acknowledged_at));
+}
+function vSignoffs() {
+  const f = S.so, list = filteredAcks(), sigs = Object.assign({}, ...Object.values(S.sigs));
+  const ras = rows('assessments').filter((a) => !f.c || a.client_id === f.c);
+  return `<div class="page"><div class="panel" style="margin-bottom:16px"><div class="row">
+  <select id="so-c" data-so="c" style="width:auto"><option value="">All clients</option>${rows('clients').map((c) => `<option value="${c.id}"${f.c === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+  <select id="so-s" data-so="s" style="width:auto"><option value="">All sites</option>${rows('sites').filter((s) => !f.c || s.client_id === f.c).map((s) => `<option value="${s.id}"${f.s === s.id ? ' selected' : ''}>${esc(s.name)}${f.c ? '' : ' · ' + esc(cName(s.client_id))}</option>`).join('')}</select>
+  <select id="so-a" data-so="a" style="width:auto;max-width:260px"><option value="">All assessments</option>${ras.map((a) => `<option value="${a.id}"${f.a === a.id ? ' selected' : ''}>${esc(a.title || a.ref)}</option>`).join('')}</select>
+  <label style="flex-direction:row">From<input id="so-from" type="date" data-so="from" value="${esc(f.from || '')}" style="width:auto"></label><label>To<input id="so-to" type="date" data-so="to" value="${esc(f.to || '')}" style="width:auto"></label>
+  <button class="btn pri sp" data-act="soPdf">Export PDF</button></div></div>
+  <div class="sect"><h2>${list.length} sign-off${list.length === 1 ? '' : 's'}</h2></div>${list.length ? ackTable(list, sigs, true) : empty('No sign-offs', 'They appear here when client staff sign published assessments.', '')}</div>`;
+}
+async function fetchSigsFor(ids) {
+  const out = {};
+  for (let i = 0; i < ids.length; i += 100) { const { data } = await sb.from('acknowledgements').select('id,signature').in('id', ids.slice(i, i + 100)); (data || []).forEach((r) => (out[r.id] = r.signature)); }
+  return out;
+}
+function vTeam() {
+  const admins = rows('profiles').filter((p) => p.role === 'admin'), pending = rows('portal_invites').filter((i) => i.role === 'admin' && !admins.some((p) => p.email === i.email));
+  return `<div class="page"><div class="sect"><div><h2>Administrators</h2><p class="hint">Administrators have full access: clients, registers, assessments, publishing and every sign-off record.</p></div><button class="btn pri" data-act="adminInvite">+ Add administrator</button></div>
+  <div class="tw"><table class="stack"><thead><tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr></thead><tbody>${admins.map((p) => `<tr><td data-l="Name"><b>${esc(p.full_name || '—')}</b>${p.id === S.me.id ? ' <span class="muted">(you)</span>' : ''}</td><td data-l="Email">${esc(p.email)}</td><td data-l="Status"><span class="tag ok">Active</span></td><td>${p.id === S.me.id ? '' : `<button class="btn sm ghost" data-act="adminRemove" data-email="${esc(p.email)}">Remove</button>`}</td></tr>`).join('')}
+  ${pending.map((i) => `<tr><td data-l="Name">${esc(i.full_name || '—')}</td><td data-l="Email">${esc(i.email)}</td><td data-l="Status"><span class="tag">Invited</span></td><td><button class="btn sm ghost" data-act="adminRemove" data-email="${esc(i.email)}">Remove</button></td></tr>`).join('')}</tbody></table></div>
+  <p class="hint">New administrators sign in at ${esc(location.origin + location.pathname)} with their email.</p></div>`;
+}
+
+// ---------- events ----------
+export async function adminClick(e, b) {
+  const d = b.dataset, aid = route[0] === 'ra' ? route[1] : null, a = aid && byId('assessments', aid);
+  switch (d.act) {
+    case 'close': return closeModal();
+    case 'copy': try { await navigator.clipboard.writeText(d.v); toast('Copied'); } catch { toast('Copy failed', true); } return;
+    case 'onboard': return onboardModal();
+    case 'onboardSave': return onboardSave();
+    case 'addSite': await ins('sites', { client_id: d.id, name: 'New site' }); return window.__render();
+    case 'delSite': if (await confirmBox('Remove this site? Sites with risk assessments cannot be removed.')) { await del('sites', d.id).catch(() => {}); window.__render(); } return;
+    case 'delClient': if (await confirmBox('Delete this client, its sites and portal users? Clients with risk assessments cannot be deleted.')) { del('clients', d.id).then(() => (location.hash = '#/clients')).catch(() => {}); } return;
+    case 'invite': return inviteModal(d.client || a?.client_id);
+    case 'inviteSave': {
+      const email = $('#iv-e').value.trim().toLowerCase(); if (!/^\S+@\S+\.\S+$/.test(email)) return toast('Enter a valid email', true);
+      const row = { email, role: $('#iv-r').value, client_id: d.client, site_id: $('#iv-s').value || null, full_name: $('#iv-n').value.trim() || null, job_title: $('#iv-j').value.trim() || null };
+      closeModal(); await ins('portal_invites', row).catch(() => {}); await refreshProfiles(); toast('Portal user added — send them the portal address'); return window.__render();
+    }
+    case 'delInvite': if (await confirmBox('Remove this person\'s portal access? Their past sign-offs are kept.', 'Remove access')) { await del('portal_invites', d.id).catch(() => {}); await refreshProfiles(); window.__render(); } return;
+    case 'newRA': return newRAModal(d.client, d.topic);
+    case 'tEdit': return topicModal(d.id);
+    case 'tSave': return topicSave(d.id);
+    case 'tDel': if (await confirmBox('Delete this topic from the library? Assessments made from it are not affected.')) { closeModal(); await del('topic_library', d.id).catch(() => {}); window.__render(); } return;
+    case 'newRASave': return newRASave();
+    case 'dupRA': return newRAModal(a.client_id), ($('#nr-from').value = 'a:' + a.id), ($('#nr-t').value = a.title);
+    case 'delRA': if (await confirmBox('Delete this risk assessment? Assessments with sign-offs cannot be deleted — archive them instead.')) { del('assessments', a.id).then(() => (location.hash = '#/ras')).catch(() => {}); } return;
+    case 'pdf': return exportRA(a);
+    case 'ppl': { const set = new Set(a.people_exposed || []); b.checked ? set.add(d.v) : set.delete(d.v); upd('assessments', a.id, { people_exposed: [...set] }); return window.__render(); }
+    case 'pplAdd': { const v = $('#ppl-new').value.trim(); if (!v) return; upd('assessments', a.id, { people_exposed: [...new Set([...(a.people_exposed || []), v])] }); return window.__render(); }
+    case 'hzPick': return pickModal('hz', a);
+    case 'hzPickSave': {
+      const ids = [...document.querySelectorAll('#pk-list input:checked:not(:disabled)')].map((i) => i.value); closeModal();
+      ids.forEach((rid, i) => { const r = byId('hazard_register', rid); ins('assessment_hazards', { assessment_id: a.id, register_id: r.id, title: r.title, category: r.category, description: r.description, sort: raHz(a.id).length + i }).catch(() => {}); });
+      if (ids.length) toast(`${ids.length} hazard${ids.length > 1 ? 's' : ''} added — suggested controls are ready on the Control measures tab`);
+      return window.__render();
+    }
+    case 'hzCustom': { const id = uid(); ins('assessment_hazards', { id, assessment_id: a.id, title: '', category: 'Other', sort: raHz(a.id).length }).catch(() => {}); window.__render(); return $(`#h-${id}-t`)?.focus(); }
+    case 'delHz': if (await confirmBox('Remove this hazard from the assessment?', 'Remove')) { await del('assessment_hazards', d.id).catch(() => {}); window.__render(); } return;
+    case 'ctlPick': return pickModal('ctl', a);
+    case 'ctlPickSave': { const ids = [...document.querySelectorAll('#pk-list input:checked:not(:disabled)')].map((i) => i.value); closeModal(); ids.forEach((rid, i) => addCtlFromReg(a, byId('control_register', rid), i).catch(() => {})); return window.__render(); }
+    case 'ctlAddReg': addCtlFromReg(a, byId('control_register', d.id)).catch(() => {}); return window.__render();
+    case 'ctlAddAll': suggestedControls(a).forEach((r, i) => addCtlFromReg(a, r, i).catch(() => {})); return window.__render();
+    case 'ctlCustom': { const id = uid(); ins('assessment_controls', { id, assessment_id: a.id, title: '', type: 'Administrative', state: 'In place', sort: raCtl(a.id).length }).catch(() => {}); window.__render(); return $(`#c-${id}-t`)?.focus(); }
+    case 'delCtl': if (await confirmBox('Remove this control from the assessment?', 'Remove')) { await del('assessment_controls', d.id).catch(() => {}); window.__render(); } return;
+    case 'ctlAct': { const c = byId('assessment_controls', d.id), r = scoreOf(a, 'res') || scoreOf(a, 'init'); await ins('actions', { assessment_id: a.id, assessment_control_id: c.id, source: 'control', title: c.title || 'Put control in place', due_date: addDays(today(), r >= 10 ? 7 : 30), priority: r >= 20 ? 'Urgent' : r >= 10 ? 'High' : 'Medium', status: 'Open' }).catch(() => {}); toast('Action created'); return window.__render(); }
+    case 'pick': upd('assessments', a.id, { [d.w + '_l']: +d.l, [d.w + '_s']: +d.s }); return window.__render();
+    case 'addAct': ins('actions', { assessment_id: a.id, title: '', source: 'manual', due_date: addDays(today(), 30), priority: 'Medium', status: 'Open' }).catch(() => {}); return window.__render();
+    case 'delAct': if (await confirmBox('Delete this action?')) { await del('actions', d.id).catch(() => {}); window.__render(); } return;
+    case 'af': S.af = d.v; return window.__render();
+    case 'auStart': S.draft = { ra: a.id, auditor: S.me.full_name || '', date: today(), summary: '', next: addDays(today(), 365), items: QS.map((q) => ({ q, a: '', note: '', act: '' })) }; return window.__render();
+    case 'auAns': S.draft.items[+d.i].a = d.v; return window.__render();
+    case 'auDiscard': S.draft = null; return window.__render();
+    case 'auRaise': { const it = S.draft.items[+d.i], id = uid(); it.act = id; await ins('actions', { id, assessment_id: a.id, source: 'audit', title: it.note || 'Audit finding: ' + it.q, due_date: addDays(today(), 30), priority: it.a === 'No' ? 'High' : 'Medium', status: 'Open' }).catch(() => {}); return window.__render(); }
+    case 'auComplete': {
+      const dr = S.draft, p = auditScore(dr.items); if (p == null) return toast('Answer at least one question', true);
+      try { await ins('audits', { assessment_id: a.id, audit_date: dr.date, auditor: dr.auditor, score: p, outcome: auditOutcome(p), summary: dr.summary, items: dr.items.map(({ q, a: ans, note }) => ({ q, a: ans, note })), next_review: dr.next || null, created_by: S.me.id });
+        if (dr.next) upd('assessments', a.id, { review_date: dr.next }); S.draft = null; toast('Audit saved'); } catch (e) { /* shown */ }
+      return window.__render();
+    }
+    case 'publish': {
+      const note = $('#pub-note').value.trim();
+      if (!raHz(a.id).length || !scoreOf(a, 'res')) { if (!(await confirmBox('This assessment has no hazards or no rating with controls yet. Publish anyway?', 'Publish'))) return; }
+      if (a.status === 'Draft') await upd('assessments', a.id, { status: 'Active' });
+      const { data, error } = await sb.rpc('publish_assessment', { aid: a.id, note: note || null });
+      if (error) return toast(niceError(error), true);
+      a.published_version = data;
+      D.published_assessments = rows('published_assessments').concat(await fetchAll('published_assessments', 'id,assessment_id,client_id,site_id,version,note,published_at,published_by', (q) => q.eq('assessment_id', a.id).eq('version', data)));
+      delete S.logs[a.id]; toast(`Version ${data} published to the client portal`); return window.__render();
+    }
+    case 'signInPerson': {
+      openModal(`<h3>Record an in-person sign-off</h3><p class="muted">Hand your device to the person. They read version ${a.published_version} and sign below.</p>${signFormHTML({ version: a.published_version, method: 'In person' })}<div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="signInPersonSave">Save sign-off</button></div>`);
+      return mountPad();
+    }
+    case 'signInPersonSave': { const r = await submitSignOff({ assessmentId: a.id, version: a.published_version, method: 'In person' }); if (!r) return; S.sigs[a.id] = { ...(S.sigs[a.id] || {}), [r.id]: r.signature }; delete r.signature; rows('acknowledgements').push(r); closeModal(); toast('Sign-off recorded'); return window.__render(); }
+    case 'ackPdf': { const acks = raAcks(a.id), sg = await fetchSigsFor(acks.map((k) => k.id)); return signOffsPDF({ title: 'Acknowledgement record', subtitle: `${a.title} · ${a.ref} · ${cName(a.client_id)} · ${sName(a.site_id)}`, acks: acks.map((k) => ({ ...k, signature: sg[k.id], _assessment: a.title, _site: sName(k.site_id) })) }); }
+    case 'soPdf': { const acks = filteredAcks(), sg = await fetchSigsFor(acks.map((k) => k.id)), f = S.so;
+      const sub = [f.c ? cName(f.c) : 'All clients', f.s ? sName(f.s) : '', f.a ? byId('assessments', f.a)?.title : '', f.from ? 'from ' + fd(f.from) : '', f.to ? 'to ' + fd(f.to) : ''].filter(Boolean).join(' · ');
+      return signOffsPDF({ title: 'Acknowledgement record', subtitle: sub, acks: acks.map((k) => ({ ...k, signature: sg[k.id], _assessment: byId('assessments', k.assessment_id)?.title, _site: sName(k.site_id) })) }); }
+    case 'reloadLog': delete S.logs[d.id]; return window.__render();
+    case 'hzEdit': return hzEditModal(d.id);
+    case 'hzRegSave': return hzRegSave(d.id);
+    case 'hzRegDel': if (await confirmBox('Delete this hazard from the register? Assessments that used it keep their copy.')) { closeModal(); await del('hazard_register', d.id).catch(() => {}); D.hazard_register_controls = rows('hazard_register_controls').filter((l) => l.hazard_id !== d.id); window.__render(); } return;
+    case 'ctlEdit': return ctlEditModal(d.id);
+    case 'ctlRegSave': { const t = $('#ce-t').value.trim(); if (!t) return toast('Enter the control', true); const patch = { title: t, type: $('#ce-y').value, description: $('#ce-d').value.trim() || null, active: $('#ce-a').checked }; closeModal(); if (d.id) upd('control_register', d.id, patch); else await ins('control_register', patch).catch(() => {}); return window.__render(); }
+    case 'ctlRegDel': if (await confirmBox('Delete this control from the register? Assessments that used it keep their copy.')) { closeModal(); await del('control_register', d.id).catch(() => {}); D.hazard_register_controls = rows('hazard_register_controls').filter((l) => l.control_id !== d.id); window.__render(); } return;
+    case 'adminInvite': openModal(`<h3>Add administrator</h3><div class="g2"><label>Full name<input id="ad-n"></label><label>Email<input id="ad-e" type="email"></label></div><p class="hint">They get full access to everything.</p><div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="adminInviteSave">Add administrator</button></div>`); return;
+    case 'adminInviteSave': { const email = $('#ad-e').value.trim().toLowerCase(); if (!/^\S+@\S+\.\S+$/.test(email)) return toast('Enter a valid email', true); const n = $('#ad-n').value.trim(); closeModal(); await ins('portal_invites', { email, role: 'admin', client_id: null, full_name: n || null }).catch(() => {}); await refreshProfiles(); return window.__render(); }
+    case 'adminRemove': if (await confirmBox(`Remove administrator access for ${d.email}?`, 'Remove access')) { const inv = rows('portal_invites').find((i) => i.email === d.email); if (inv) await del('portal_invites', inv.id).catch(() => {}); else { const p = rows('profiles').find((x) => x.email === d.email); if (p) await upd('profiles', p.id, { role: 'none' }); } await refreshProfiles(); window.__render(); } return;
+  }
+}
+async function refreshProfiles() { D.profiles = await fetchAll('profiles'); }
+
+async function exportRA(a) {
+  const { data: sg } = await sb.from('acknowledgements').select('id,signature').eq('assessment_id', a.id);
+  const sigs = Object.fromEntries((sg || []).map((r) => [r.id, r.signature]));
+  assessmentPDF({ ...a, client: cName(a.client_id), site: sName(a.site_id), people: a.people_exposed || [], hazards: raHz(a.id), controls: raCtl(a.id),
+    versionLabel: a.published_version ? `Working copy · last published as version ${a.published_version}` : 'Working copy · not yet published',
+    actions: raActs(a.id), audits: rows('audits').filter((u) => u.assessment_id === a.id), acks: raAcks(a.id).map((k) => ({ ...k, signature: sigs[k.id] })) });
+}
+
+// field edits: data-b="table|id|field"
+export function adminField(el, isChange) {
+  if (el.dataset.ui) { S[el.dataset.ui] = el.value; return true; }
+  if (el.dataset.so) { S.so[el.dataset.so] = el.value; if (el.dataset.so === 'c') { S.so.s = ''; S.so.a = ''; } return true; }
+  if (el.dataset.au != null && S.draft) { const k = el.dataset.au; if (k[0] === 'n' && /^n\d+$/.test(k)) S.draft.items[+k.slice(1)].note = el.value; else S.draft[k] = el.value; return false; }
+  const [t, id, f] = (el.dataset.b || '').split('|'); if (!t) return false;
+  let v = el.type === 'checkbox' ? el.checked : el.value;
+  if (v === '' && (f.endsWith('_id') || el.type === 'date')) v = null;
+  const patch = { [f]: v };
+  if (t === 'actions' && f === 'status') patch.completed_on = v === 'Done' ? today() : null;
+  if (t === 'assessments' && f === 'client_id') { const s = clientSites(v)[0]; patch.site_id = s?.id; }
+  if (t === 'assessments') patch.updated_at = nowIso();
+  if (t === 'portal_invites') { upd(t, id, patch).then(refreshProfiles).then(() => window.__render()).catch(() => {}); return false; }
+  const sendPatch = { ...patch }; delete sendPatch.updated_at;
+  const r = byId(t, id); if (r && t === 'assessments') r.updated_at = patch.updated_at;
+  upd(t, id, sendPatch, isChange ? 0 : 700).catch(() => {});
+  return isChange && (el.tagName === 'SELECT' || el.type === 'date');
+}
+onRerender(() => window.__render && window.__render());

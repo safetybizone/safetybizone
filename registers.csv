@@ -1,0 +1,388 @@
+Register,Category / type,Title,Description,Linked to
+Hazard,"Slips, trips and falls","Slips, trips and falls on the same level","Wet or uneven floors, spills, trailing cables, clutter and poor lighting can cause people to slip or trip, leading to sprains, fractures or head injuries.",Spills cleaned immediately; Good housekeeping; Floors kept in good repair; Cables managed; Slip-resistant footwear; Adequate lighting; Clear walkways
+Hazard,"Slips, trips and falls",Falls on stairs and steps,"Stairs, steps and changes in level can cause falls, especially when carrying items or in poor light.",Handrails on stairs; Adequate lighting; Clear walkways; Floors kept in good repair
+Hazard,"Slips, trips and falls",Ice and snow,"Icy or snowy paths, car parks and entrances can cause serious falls.",Gritting and snow clearance; Entrance matting; Slip-resistant footwear; Adequate lighting
+Hazard,Working at height,Falls from ladders and stepladders,"Overreaching, defective ladders or poor footing can cause falls from ladders, with serious injuries.","Avoid work at height; Podium steps or platforms; Ladders for short, light work only; Ladder inspections; Safe ladder use; Induction and task training"
+Hazard,Working at height,Falls from height,"Work on roofs, platforms, edges or openings can lead to falls causing major or fatal injury.",Avoid work at height; Edge protection; Fragile surfaces protected; Fall arrest or restraint; Rescue plan; Stop work in bad weather; Authorised and competent users only
+Hazard,Working at height,Mobile towers,"Incorrectly built or moved towers can collapse or overturn, and users can fall.",Towers erected by trained people; Pre-use checks; Edge protection; Exclusion zone below
+Hazard,Working at height,Mobile elevating work platforms,"MEWPs can overturn, trap operators against structures or eject them.",Trained MEWP operators; Fall arrest or restraint; Rescue plan; Exclusion zone below; Statutory inspection
+Hazard,Working at height,Falling objects,"Tools, materials or stored goods falling from height can strike people below.",Exclusion zone below; Heavy items at waist height; Tools and materials secured; Site PPE; Racking inspected
+Hazard,Manual handling,Manual handling of loads,"Lifting, carrying, pushing and pulling heavy, bulky or awkward loads can cause back and musculoskeletal injuries.",Handling aids; Manual handling assessment; Loads broken down; Manual handling training; Team lifting; Heavy items at waist height
+Hazard,Manual handling,Repetitive movements and posture,Repetitive tasks and awkward postures can cause upper limb disorders and back pain.,Task rotation and breaks; Manual handling assessment; Adjustable chairs and screens
+Hazard,Manual handling,Moving and handling people,"Helping people move, transfer or reposition can injure carers and the person being moved.",Individual moving and handling plan; Hoists and slings; Hoist examination; Height-adjustable beds and baths; Manual handling training
+Hazard,Electrical,Electric shock and burns,"Faulty equipment, damaged leads or unsafe work on electrical systems can cause shock, burns, fire or death.",Fixed wiring inspected; Portable appliance checks; Visual checks of leads and plugs; RCD protection; No live working; Qualified electricians only
+Hazard,Electrical,Striking buried or hidden services,"Digging or drilling can strike buried cables, gas pipes or hidden wiring.",Services located before digging or drilling; Safe system of work; No live working
+Hazard,Electrical,Overhead power lines,"Tall vehicles, plant, ladders or tipping trailers can contact overhead lines.",Overhead line precautions; Safe system of work
+Hazard,Fire,Fire,"A fire could cause burns, smoke inhalation or death and destroy the premises.",Fire risk assessment; Fire detection and alarm; Escape routes kept clear; Fire extinguishers; Fire drills; Ignition sources controlled; Combustible storage controlled; Personal evacuation plans; Accessible routes
+Hazard,Fire,Hot work,"Welding, cutting, torches and grinding can start fires in nearby materials.",Hot work permit; Fire extinguishers; Combustible storage controlled
+Hazard,Fire,Flammable liquids and gases,"Flammable liquids, vapours and gases can ignite or explode.",Flammables store; Ignition sources controlled; COSHH assessments; Gas detection
+Hazard,Hazardous substances (COSHH),Hazardous substances,"Contact with or breathing in chemicals can cause burns, dermatitis, respiratory illness or poisoning.","COSHH assessments; Safer products chosen; Secure, labelled storage; Dosing and dilution systems; Gloves; Eye protection; Eyewash and washing facilities"
+Hazard,Hazardous substances (COSHH),Dermatitis and skin damage,Wet work and contact with chemicals or products can cause contact dermatitis.,Gloves; Skin care and checks; Health surveillance; COSHH assessments
+Hazard,Hazardous substances (COSHH),Dust and fume,"Breathing dust or fume, such as wood dust, silica or welding fume, can cause serious lung disease and cancer.",Local exhaust ventilation; Face-fit tested RPE; Water suppression or on-tool extraction; Good housekeeping; Health surveillance
+Hazard,Hazardous substances (COSHH),Silica dust,"Cutting or grinding stone, brick and concrete releases silica that causes silicosis and lung cancer.",Silica dust controlled; Water suppression or on-tool extraction; Face-fit tested RPE; Health surveillance
+Hazard,Asbestos,Disturbance of asbestos,"Drilling, cutting or damaging asbestos-containing materials can release fibres that cause fatal lung disease decades later.",Asbestos register checked; Refurbishment survey; Asbestos awareness training; Stop if suspect material found; Licensed contractors
+Hazard,Water and flooding,Legionella bacteria,"Water systems that are poorly maintained can grow legionella, which causes Legionnaires' disease when spray is breathed in.",Legionella risk assessment; Water temperatures monitored; Little-used outlets flushed
+Hazard,Fire,Burns and scalds,"Hot water, surfaces, liquids, steam and equipment can cause burns and scalds.",Hot surfaces and liquids; Gloves; Thermostatic mixing valves; Induction and task training
+Hazard,Noise and vibration,Noise,Exposure to loud noise can cause permanent hearing loss and tinnitus.,Quieter equipment; Noise assessment; Hearing protection zones; Hearing protection; Health surveillance
+Hazard,Noise and vibration,Hand-arm vibration,Regular use of vibrating tools can cause hand-arm vibration syndrome and carpal tunnel syndrome.,Low-vibration tools; Trigger time limits; Health surveillance; Planned maintenance
+Hazard,Machinery and equipment,Contact with moving parts of machinery,"Entanglement, cuts, crushing or amputation from moving parts, blades or cutters.",Fixed and interlocked guards; Machine-specific training; Emergency stops; Lock-off and isolation; No loose clothing or jewellery; Planned maintenance; Authorised and competent users only
+Hazard,Machinery and equipment,Cutting machinery and blades,"Saws, cutters and slicers can cause serious cuts and amputations.",Fixed and interlocked guards; Push sticks and jigs; Blades and cutters maintained; Machine-specific training; Cut-resistant gloves
+Hazard,Machinery and equipment,Hand tools and power tools,"Defective or misused tools can cause cuts, eye injuries and impact injuries.",Pre-use checks; 110V or battery tools; Eye protection; Planned maintenance
+Hazard,Machinery and equipment,Flying particles and debris,"Grinding, cutting, mowing and striking can throw particles into eyes or at bystanders.",Eye protection; Debris guards and exclusion zones; Fixed and interlocked guards; Safety signs and barriers
+Hazard,Machinery and equipment,Pressure systems and compressed air,"Failure of pressure vessels, hoses or fittings can cause explosion or injection injuries.",Written scheme of examination; Planned maintenance; Authorised and competent users only; Eye protection
+Hazard,Gas,Gas cylinders,"Damaged or poorly stored cylinders can leak, fall, catch fire or explode.",Cylinders stored safely; Cylinder trolleys; Flashback arrestors; Flammables store
+Hazard,Gas,Gas appliances and carbon monoxide,Faulty gas appliances or flues can leak gas or produce carbon monoxide.,Gas Safe servicing; Gas detection; Gas interlock and ventilation
+Hazard,Vehicles and traffic,Workplace transport,"People can be struck or crushed by moving vehicles, plant or lift trucks.",Pedestrians and vehicles kept apart; Site speed limit; Trained banksman for reversing; High-visibility clothing; Reversing aids; Trained and authorised drivers; Key control
+Hazard,Vehicles and traffic,Lift trucks,"Lift trucks can overturn, drop loads or strike pedestrians.",Trained and authorised drivers; Daily vehicle checks; Pedestrians and vehicles kept apart; Statutory inspection; Key control
+Hazard,Vehicles and traffic,Driving for work,"Road traffic collisions caused by fatigue, distraction, vehicle faults or weather.",Licence checks; Vehicles serviced and checked; Journey planning; No handheld phones; Fatigue managed; Breakdown cover and procedure
+Hazard,Vehicles and traffic,Loading and unloading vehicles,"Falls from vehicles, moving loads, and vehicles moving during loading.",Vehicles immobilised; Loads secured; Delivery procedure; High-visibility clothing; Handling aids
+Hazard,Vehicles and traffic,Mobile plant,"Excavators, dumpers and similar plant can overturn or strike people.",Competent plant operators; Daily vehicle checks; Traffic management plan; Pedestrians and vehicles kept apart; Key control
+Hazard,Lone working,Working alone,"Someone working alone may not get help quickly after an accident, illness or attack.",Lone working procedure; Check-in system; Lone worker device or app; High-risk tasks not done alone
+Hazard,Violence and aggression,Violence and aggression,"Staff may face verbal abuse, threats or physical assault from members of the public or service users.",Conflict resolution training; Secure layout and alarms; Incidents recorded and reviewed; Lone working procedure; Behaviour support plans
+Hazard,Stress and wellbeing,Work-related stress,"Excessive demands, lack of control or poor support can cause anxiety, depression and absence.",Stress risk assessment; Regular one-to-ones; Employee assistance; Occupational health referral
+Hazard,Stress and wellbeing,Display screen equipment,"Prolonged computer use with a poor set-up can cause neck, back and upper limb pain and eye strain.",Workstation assessments; Adjustable chairs and screens; Eye tests; Task rotation and breaks
+Hazard,Health,Infection,"Infections can spread between staff and others through contact, body fluids or contaminated surfaces.",Hand hygiene; Gloves and aprons; Cleaning schedule; Clinical waste segregated; Outbreak management; Seasonal vaccination encouraged
+Hazard,Health,Sharps and needlestick injuries,"Needles, blades and other sharps can cause injuries and transmit blood-borne viruses.",Sharps bins at point of use; Safer sharps; Needlestick procedure; Hepatitis B vaccination; Gloves
+Hazard,Health,Biological agents and body fluids,"Blood, body fluids, animal waste and contaminated materials can transmit infection.",Gloves and aprons; Hand hygiene; Clinical waste segregated; Hepatitis B vaccination; Zoonoses precautions
+Hazard,Food safety,Food poisoning,"Poor hygiene, cross-contamination or temperature control can cause food poisoning.",Food safety management system; Food hygiene training; Temperatures monitored; Hand hygiene; Cleaning schedule
+Hazard,Food safety,Food allergens,Incorrect allergen information or cross-contamination can cause severe allergic reactions.,Allergen information; Allergen controls in preparation; Food hygiene training
+Hazard,Food safety,Knives and sharp utensils,"Knives, slicers and broken glass can cause serious cuts.",Safe knife use; Cut-resistant gloves; First aid cover
+Hazard,"Slips, trips and falls",Glass and glazing,Broken glassware or walking into glazing can cause cuts.,Safety glass and manifestation; Good housekeeping; Gloves
+Hazard,Confined spaces,Confined spaces,"Lack of oxygen, toxic gases, flooding or engulfment in tanks, pits, silos or sewers can kill quickly.",Avoid entry; Permit to work; Atmosphere monitoring; Rescue plan; Authorised and competent users only
+Hazard,Water and flooding,Drowning,"Falling into pools, rivers, lakes or tanks can lead to drowning.",Rescue equipment; Competent supervision; Qualified lifeguards; Depth markings and signs; Pool safety operating procedure
+Hazard,Hazardous substances (COSHH),Pool and spa chemicals,Mixing or mishandling pool chemicals can release toxic chlorine gas.,"Pool chemicals managed; Secure, labelled storage; Water quality tested; Face-fit tested RPE"
+Hazard,Animals,Animal handling,"Animals can kick, bite, crush or scratch people, or pass on diseases.",Animal handling procedure; Pens and races in good repair; Protective clothing for animals; Zoonoses precautions
+Hazard,Working outdoors,Weather and sun exposure,"Working outdoors can cause sunburn, skin cancer, heat stress, cold stress or lightning strike.",Sun and weather protection; Stop work in bad weather; Welfare facilities
+Hazard,Working outdoors,Leptospirosis (Weil's disease),Water or soil contaminated by rat urine can cause leptospirosis through cuts or the mouth.,Leptospirosis precautions; Gloves; Hand hygiene
+Hazard,Hazardous substances (COSHH),Pesticides and fertilisers,"Pesticides and fertilisers can poison, burn or sensitise users and others nearby.","Certified pesticide users; COSHH assessments; Secure, labelled storage; Gloves; Face-fit tested RPE"
+Hazard,Construction,Excavations,"Excavations can collapse, flood or have people, vehicles or materials fall into them.",Excavations supported; Services located before digging or drilling; Safety signs and barriers; Competent plant operators
+Hazard,Construction,Collapse of structures,"Temporary works, scaffolds, racking or marquees can collapse if poorly built or overloaded.",Structures inspected and within load limits; Report defects and near misses; Temporary structures checked; Racking inspected; Scaffold inspections; Wind speed limits
+Hazard,Public and visitors,Members of the public and visitors,"Visitors and the public, including children, can be hurt by work activities or enter unsafe areas.",Safety signs and barriers; Public areas checked; Site secured; Contractor sign-in and induction
+Hazard,Public and visitors,Contractors on site,"Contractors may not know site hazards, and their work can put staff and visitors at risk.",Contractor vetting; Contractor sign-in and induction; Permit to work; Asbestos register checked
+Hazard,Vulnerable people,Vulnerable workers,"Young workers, new and expectant mothers and people with health conditions can be at greater risk.",Young worker assessment; New and expectant mothers assessment; Health conditions supported; Competent supervision
+Hazard,Vulnerable people,Safeguarding vulnerable people,"Children and vulnerable adults could be harmed, abused or go missing.",Safeguarding procedures; Recruitment checks; Competent supervision; Care plans
+Hazard,Health,Medicines,"Medication errors, misuse or poor storage can harm patients and staff.",Medicines policy; Medication records; Medicines stored securely
+Hazard,Vulnerable people,Falls by residents or service users,"Older or frail people may fall, with fractures and head injuries.",Falls risk assessment; Care plans; Bed rails assessed; Clear walkways
+Hazard,Radiation,Ionising radiation,X-ray equipment can expose staff and patients to radiation.,Radiation protection adviser; X-ray equipment tested; Safety signs and barriers
+Hazard,Radiation,Lasers and intense light,Lasers and IPL can cause eye injury and skin burns.,Laser local rules; Laser eyewear; Authorised and competent users only
+Hazard,Fire,Oxygen and medical gases,Oxygen enrichment greatly increases fire risk; cylinders can fall or leak.,Oxygen safety; Cylinders stored safely; Ignition sources controlled
+Hazard,Events,Crowds and events,"Overcrowding, poor routes or emergencies at events can lead to crush injuries.",Crowd management plan; Liaison with authorities; Emergency procedure; First aid cover
+Hazard,Fire,Lithium batteries,Damaged or overcharged lithium batteries can catch fire or explode.,Safe battery charging; Fire detection and alarm; Fire extinguishers
+Hazard,Fire,Emergencies and first aid,"Without arrangements, injuries and emergencies may not be dealt with quickly.",First aid cover; Emergency procedure; Escape routes kept clear
+Control,Administrative,Assessment shared and reviewed,"Staff are briefed on this assessment, sign to confirm, and it is reviewed yearly or after any incident or change.",
+Control,Administrative,Induction and task training,"Everyone receives induction and task-specific training before starting, with records kept.",Falls from ladders and stepladders; Burns and scalds
+Control,Administrative,Competent supervision,Work is supervised by someone competent who can step in when standards slip.,Drowning; Vulnerable workers; Safeguarding vulnerable people
+Control,Administrative,Report defects and near misses,"Staff know how to report hazards, defects and near misses, and reports are acted on promptly.",Collapse of structures
+Control,Administrative,First aid cover,"Trained first aiders and stocked first aid kits are available on every shift, with contact details displayed.",Knives and sharp utensils; Crowds and events; Emergencies and first aid
+Control,Administrative,Emergency procedure,"A written emergency procedure is in place, practised and known to all staff.",Crowds and events; Emergencies and first aid
+Control,Administrative,Good housekeeping,"Work areas are kept tidy, with materials stored away and waste removed regularly.","Slips, trips and falls on the same level; Dust and fume; Glass and glazing"
+Control,Administrative,Authorised and competent users only,"Only trained, authorised people may carry out this task or use this equipment.",Falls from height; Contact with moving parts of machinery; Pressure systems and compressed air; Confined spaces; Lasers and intense light
+Control,Administrative,Permit to work,"A permit to work controls the task, setting out isolation, precautions and sign-off.",Confined spaces; Contractors on site
+Control,Administrative,Safe system of work,A written safe system of work or method statement is followed for the task.,Striking buried or hidden services; Overhead power lines
+Control,Administrative,Health surveillance,"Health surveillance is provided where required, and results are acted on.",Dermatitis and skin damage; Dust and fume; Silica dust; Noise; Hand-arm vibration
+Control,Administrative,Occupational health referral,"Staff can be referred to occupational health, and reasonable adjustments are made.",Work-related stress
+Control,Administrative,Pre-use checks,Equipment is visually checked before each use; faulty items are labelled and taken out of use.,Mobile towers; Hand tools and power tools
+Control,Administrative,Planned maintenance,"Equipment is maintained to the manufacturer's schedule by a competent person, with records kept.",Hand-arm vibration; Contact with moving parts of machinery; Hand tools and power tools; Pressure systems and compressed air
+Control,Administrative,Statutory inspection,"Thorough examinations required by law (e.g. LOLER, PSSR) are carried out at the right intervals.",Mobile elevating work platforms; Lift trucks
+Control,Administrative,Structures inspected and within load limits,"Structures are built to the design or supplier instructions, kept within their safe working load and inspected by a competent person.",Collapse of structures
+Control,Engineering,Safety signs and barriers,"Hazard areas are signed and, where needed, barriered off to keep others away.",Flying particles and debris; Excavations; Members of the public and visitors; Ionising radiation
+Control,Engineering,Adequate lighting,"Work areas, stairs and routes are well lit, and failed lights are replaced promptly.","Slips, trips and falls on the same level; Falls on stairs and steps; Ice and snow"
+Control,Administrative,Welfare facilities,"Toilets, washing facilities, drinking water and rest areas are provided and kept clean.",Weather and sun exposure
+Control,Administrative,Young worker assessment,Workers under 18 have a specific assessment and are kept away from prohibited tasks.,Vulnerable workers
+Control,Administrative,New and expectant mothers assessment,An individual assessment is completed when an employee tells us she is pregnant or breastfeeding.,Vulnerable workers
+Control,Administrative,Contractor vetting,"Contractors are checked for competence and insurance, and their assessments and method statements are reviewed.",Contractors on site
+Control,Administrative,Contractor sign-in and induction,"Contractors sign in, receive a site induction and are told about site hazards and emergency arrangements.",Members of the public and visitors; Contractors on site
+Control,Administrative,Spills cleaned immediately,"Spills are cleaned straight away using the right equipment, with wet floor signs in place.","Slips, trips and falls on the same level"
+Control,Engineering,Floors kept in good repair,"Damaged flooring, mats and edges are repaired or replaced promptly.","Slips, trips and falls on the same level; Falls on stairs and steps"
+Control,Engineering,Cables managed,"Trailing cables are avoided, routed safely or covered with cable protectors.","Slips, trips and falls on the same level"
+Control,PPE,Slip-resistant footwear,Suitable slip-resistant footwear is worn in wet or greasy areas.,"Slips, trips and falls on the same level; Ice and snow"
+Control,Administrative,Clear walkways,"Walkways, stairs and exits are kept free of obstructions.","Slips, trips and falls on the same level; Falls on stairs and steps; Falls by residents or service users"
+Control,Engineering,Handrails on stairs,Stairs and steps have secure handrails and highlighted nosings.,Falls on stairs and steps
+Control,Engineering,Entrance matting,Entrance matting stops water being walked in during wet weather.,Ice and snow
+Control,Administrative,Gritting and snow clearance,Priority routes are gritted and cleared before people arrive in icy weather.,Ice and snow
+Control,Elimination,Avoid work at height,"Work is done from the ground where possible, for example using extension poles.",Falls from ladders and stepladders; Falls from height
+Control,Administrative,"Ladders for short, light work only","Ladders are used only for short-duration, light work where a safer platform is not justified.",Falls from ladders and stepladders
+Control,Administrative,Ladder inspections,"Ladders are pre-use checked and formally inspected, with a register kept.",Falls from ladders and stepladders
+Control,Administrative,Safe ladder use,"Ladders are set on firm, level ground, secured or footed, and users keep three points of contact.",Falls from ladders and stepladders
+Control,Substitution,Podium steps or platforms,Podium steps or work platforms with guard rails are used instead of ladders where possible.,Falls from ladders and stepladders
+Control,Administrative,Towers erected by trained people,"Mobile towers are erected and inspected by trained people, with outriggers and brakes in use.",Mobile towers
+Control,Engineering,Edge protection,"Guard rails and toe boards are in place at open edges, openings and roof perimeters.",Falls from height; Mobile towers
+Control,Engineering,Fragile surfaces protected,"Fragile roofs and rooflights are covered or protected, and staging is used to spread the load.",Falls from height
+Control,PPE,Fall arrest or restraint,A harness and lanyard attached to a suitable anchor is used where collective protection is not possible.,Falls from height; Mobile elevating work platforms
+Control,Administrative,Trained MEWP operators,"MEWPs are operated by trained, authorised operators, with ground conditions checked and a rescue plan.",Mobile elevating work platforms
+Control,Engineering,Exclusion zone below,The area below work at height is barriered to protect people from falling objects.,Mobile towers; Mobile elevating work platforms; Falling objects
+Control,Administrative,Rescue plan,A rescue plan is in place and practised before work at height or in confined spaces starts.,Falls from height; Mobile elevating work platforms; Confined spaces
+Control,Engineering,Tools and materials secured,Tools are tethered and materials secured so they cannot fall.,Falling objects
+Control,Administrative,Stop work in bad weather,"Work stops in high winds, heavy rain, ice or lightning.",Falls from height; Weather and sun exposure
+Control,Administrative,Manual handling assessment,"Significant lifting tasks are assessed, considering the task, load, environment and individual.",Manual handling of loads; Repetitive movements and posture
+Control,Substitution,Handling aids,"Trolleys, sack trucks, hoists or lifting aids are provided and used.",Manual handling of loads; Loading and unloading vehicles
+Control,Administrative,Manual handling training,Staff are trained in good handling technique with refresher training.,Manual handling of loads; Moving and handling people
+Control,Administrative,Loads broken down,"Loads are split into smaller, lighter units or ordered in smaller pack sizes.",Manual handling of loads
+Control,Administrative,Team lifting,"Two or more people lift heavy or awkward items, with one person giving instructions.",Manual handling of loads
+Control,Engineering,Heavy items at waist height,Storage is arranged so heavy and frequently used items sit between knee and shoulder height.,Falling objects; Manual handling of loads
+Control,Administrative,Task rotation and breaks,Repetitive tasks are rotated and regular breaks are taken.,Repetitive movements and posture; Display screen equipment
+Control,Administrative,Individual moving and handling plan,"Each person has a moving and handling plan, reviewed when their needs change.",Moving and handling people
+Control,Engineering,Hoists and slings,"Suitable hoists and correctly sized slings are used, with two carers where the plan requires.",Moving and handling people
+Control,Administrative,Hoist examination,Hoists and slings are thoroughly examined every six months and checked before use.,Moving and handling people
+Control,Engineering,Height-adjustable beds and baths,Height-adjustable beds and baths are used to avoid bending and stooping.,Moving and handling people
+Control,Administrative,Fixed wiring inspected,The fixed electrical installation is inspected and tested by a qualified electrician at recommended intervals.,Electric shock and burns
+Control,Administrative,Portable appliance checks,Portable equipment is inspected and tested at intervals suited to its use.,Electric shock and burns
+Control,Administrative,Visual checks of leads and plugs,"Users check plugs, leads and casings before use and report damage.",Electric shock and burns
+Control,Engineering,RCD protection,"Residual current devices protect portable equipment, especially outdoors.",Electric shock and burns
+Control,Elimination,No live working,Equipment is isolated and proved dead before work; live working is not permitted.,Electric shock and burns; Striking buried or hidden services
+Control,Engineering,Lock-off and isolation,Isolation points are locked off and tagged during maintenance or cleaning.,Contact with moving parts of machinery
+Control,Administrative,Qualified electricians only,Electrical installation and repair is carried out only by qualified electricians.,Electric shock and burns
+Control,Administrative,Services located before digging or drilling,Underground and hidden services are located with drawings and a cable detector before breaking ground or drilling.,Striking buried or hidden services; Excavations
+Control,Substitution,110V or battery tools,110V reduced-voltage or battery-powered tools are used on site.,Hand tools and power tools
+Control,Administrative,Overhead line precautions,"Work near overhead power lines is planned with goal posts, barriers or a safe clearance distance.",Overhead power lines
+Control,Administrative,Fire risk assessment,A fire risk assessment is in place and reviewed by a competent person.,Fire
+Control,Engineering,Fire detection and alarm,Fire alarms are tested weekly and serviced by a competent engineer.,Fire; Lithium batteries
+Control,Engineering,Fire extinguishers,"Suitable extinguishers are provided, checked monthly and serviced annually.",Fire; Hot work; Lithium batteries
+Control,Administrative,Escape routes kept clear,"Escape routes and fire exits are kept clear, signed and lit, with emergency lighting tested.",Fire; Emergencies and first aid
+Control,Administrative,Fire drills,Fire drills are held at least twice a year and fire marshals are trained.,Fire
+Control,Administrative,Personal evacuation plans,Anyone who needs help to evacuate has a personal emergency evacuation plan.,Fire
+Control,Administrative,Ignition sources controlled,Smoking is restricted to designated areas and heaters and hot equipment are kept clear of combustibles.,Fire; Flammable liquids and gases; Oxygen and medical gases
+Control,Administrative,Combustible storage controlled,Combustible materials and waste are kept to a minimum and stored away from ignition sources.,Fire; Hot work
+Control,Administrative,Hot work permit,"Hot work needs a permit, a fire watch during work and a check of the area afterwards.",Hot work
+Control,Engineering,Flammables store,"Flammable liquids and gases are kept in minimum quantities in a ventilated, signed store or cabinet.",Flammable liquids and gases; Gas cylinders
+Control,Engineering,Fire doors maintained,"Fire doors are kept shut, self-closing and in good repair.",
+Control,Administrative,COSHH assessments,"Each hazardous substance has a COSHH assessment, and safety data sheets are available.",Flammable liquids and gases; Hazardous substances; Dermatitis and skin damage; Pesticides and fertilisers
+Control,Substitution,Safer products chosen,"Less hazardous products, forms (e.g. pellets instead of powders) or methods are chosen where possible.",Hazardous substances
+Control,Engineering,"Secure, labelled storage","Substances are stored securely in original labelled containers, away from food and incompatible chemicals.",Hazardous substances; Pool and spa chemicals; Pesticides and fertilisers
+Control,Engineering,Local exhaust ventilation,"Dust and fume are captured at source by LEV, which is examined every 14 months.",Dust and fume
+Control,PPE,Gloves,Suitable gloves for the substance or task are provided and worn.,Hazardous substances; Dermatitis and skin damage; Burns and scalds; Sharps and needlestick injuries; Glass and glazing; Leptospirosis (Weil's disease); Pesticides and fertilisers
+Control,PPE,Eye protection,"Safety glasses, goggles or a face shield are worn where there is a risk to the eyes.",Hazardous substances; Hand tools and power tools; Flying particles and debris; Pressure systems and compressed air
+Control,PPE,Face-fit tested RPE,"Suitable respiratory protection is provided, face-fit tested and worn.",Dust and fume; Silica dust; Pool and spa chemicals; Pesticides and fertilisers
+Control,Engineering,Eyewash and washing facilities,Eyewash and hand washing facilities are available near where substances are used.,Hazardous substances
+Control,Engineering,Dosing and dilution systems,Chemicals are dispensed through dosing systems or measured correctly; mixing products is not allowed.,Hazardous substances
+Control,Administrative,Skin care and checks,"Staff dry hands thoroughly, use moisturiser, and report skin problems early.",Dermatitis and skin damage
+Control,Engineering,Water suppression or on-tool extraction,Cutting and drilling uses water suppression or on-tool extraction to control dust.,Dust and fume; Silica dust
+Control,Administrative,Asbestos register checked,The asbestos register is checked before any work that could disturb the building fabric.,Disturbance of asbestos; Contractors on site
+Control,Administrative,Refurbishment survey,A refurbishment and demolition survey is done before intrusive work.,Disturbance of asbestos
+Control,Administrative,Asbestos awareness training,Staff who could disturb asbestos have asbestos awareness training.,Disturbance of asbestos
+Control,Administrative,Stop if suspect material found,"Work stops immediately if suspected asbestos is found, and the area is closed off.",Disturbance of asbestos
+Control,Administrative,Licensed contractors,Licensable asbestos work is carried out only by a licensed contractor.,Disturbance of asbestos
+Control,Administrative,Legionella risk assessment,A legionella risk assessment is in place and a responsible person is appointed.,Legionella bacteria
+Control,Administrative,Water temperatures monitored,"Hot water is stored at 60°C or above and cold water kept below 20°C, with monthly checks.",Legionella bacteria
+Control,Administrative,Little-used outlets flushed,Little-used outlets are flushed weekly and showerheads cleaned and descaled quarterly.,Legionella bacteria
+Control,Engineering,Thermostatic mixing valves,TMVs limit outlet temperatures where scalding is a risk and are serviced regularly.,Burns and scalds
+Control,Administrative,Noise assessment,Noise levels are measured and exposure assessed by a competent person.,Noise
+Control,Substitution,Quieter equipment,"Quieter machines and methods are chosen, and equipment is maintained to stay quiet.",Noise
+Control,Engineering,Hearing protection zones,Areas above the upper action value are marked as hearing protection zones.,Noise
+Control,PPE,Hearing protection,Suitable hearing protection is provided and worn where required.,Noise
+Control,Substitution,Low-vibration tools,Low-vibration tools are chosen and kept sharp and well maintained.,Hand-arm vibration
+Control,Administrative,Trigger time limits,Trigger times are recorded and kept within exposure limits.,Hand-arm vibration
+Control,Engineering,Fixed and interlocked guards,Dangerous parts are enclosed by fixed or interlocked guards that are checked before use.,Contact with moving parts of machinery; Cutting machinery and blades; Flying particles and debris
+Control,Engineering,Emergency stops,Emergency stops are within reach and tested regularly.,Contact with moving parts of machinery
+Control,Administrative,No loose clothing or jewellery,"Loose clothing, jewellery and long hair are secured near rotating parts.",Contact with moving parts of machinery
+Control,Administrative,Machine-specific training,Operators are trained and signed off on each machine before using it unsupervised.,Contact with moving parts of machinery; Cutting machinery and blades
+Control,Engineering,Push sticks and jigs,"Push sticks, jigs and holders keep hands away from blades and cutters.",Cutting machinery and blades
+Control,Administrative,Blades and cutters maintained,"Blades and cutters are sharp, correctly fitted and changed by competent people.",Cutting machinery and blades
+Control,Administrative,Abrasive wheels mounted by trained people,Abrasive wheels are mounted only by trained people and run within their speed rating.,
+Control,Engineering,Two-hand and light guard controls,"Two-hand controls, light curtains or interlocks protect operators on presses and guillotines.",
+Control,Administrative,Press and guard inspections,Power presses and their guards are inspected after setting and thoroughly examined by law.,
+Control,Engineering,Pedestrians and vehicles kept apart,Pedestrian routes are separated from vehicle routes with barriers and marked crossings.,Workplace transport; Lift trucks; Mobile plant
+Control,Administrative,Site speed limit,A site speed limit is signed and enforced.,Workplace transport
+Control,Administrative,Trained banksman for reversing,"Reversing is avoided where possible; where needed, a trained banksman guides the vehicle.",Workplace transport
+Control,PPE,High-visibility clothing,High-visibility clothing is worn in yards and around vehicles.,Workplace transport; Loading and unloading vehicles
+Control,Administrative,Trained and authorised drivers,"Lift truck and plant drivers are trained, assessed and authorised in writing.",Workplace transport; Lift trucks
+Control,Administrative,Daily vehicle checks,Drivers complete daily checks and defects are reported before use.,Lift trucks; Mobile plant
+Control,Administrative,Key control,"Keys are removed when vehicles and plant are left, so only authorised drivers can use them.",Workplace transport; Lift trucks; Mobile plant
+Control,Engineering,Reversing aids,"Vehicles have cameras, sensors, alarms and mirrors in working order.",Workplace transport
+Control,Administrative,Loads secured,"Loads are restrained to industry guidance, checked before departure and after partial unloading.",Loading and unloading vehicles
+Control,Engineering,Vehicles immobilised,"Vehicles are braked, switched off and chocked or locked out during loading and maintenance.",Loading and unloading vehicles
+Control,Administrative,Licence checks,Driving licences are checked on recruitment and at least yearly.,Driving for work
+Control,Administrative,Vehicles serviced and checked,"Vehicles are serviced to schedule, with walk-round checks before journeys.",Driving for work
+Control,Administrative,Journey planning,Journeys are planned with breaks every two hours and overnight stays where needed.,Driving for work
+Control,Administrative,No handheld phones,Handheld phones are not used while driving; calls wait until parked safely.,Driving for work
+Control,Administrative,Fatigue managed,"Working hours and shift patterns limit fatigue, and staff must not drive when tired.",Driving for work
+Control,Administrative,Breakdown cover and procedure,Vehicles have breakdown cover and drivers know what to do if they break down.,Driving for work
+Control,Administrative,Lone working procedure,A lone working procedure sets out what lone workers may and may not do.,Working alone; Violence and aggression
+Control,Administrative,Check-in system,"Lone workers check in at agreed times, with an escalation plan if they do not.",Working alone
+Control,Engineering,Lone worker device or app,Lone workers carry a charged phone or lone worker device with an alert function.,Working alone
+Control,Elimination,High-risk tasks not done alone,High-risk tasks are not carried out by someone working alone.,Working alone
+Control,Administrative,Conflict resolution training,Staff are trained to recognise and defuse conflict and to leave if threatened.,Violence and aggression
+Control,Administrative,Incidents recorded and reviewed,"Abuse and violent incidents are recorded, reviewed and supported.",Violence and aggression
+Control,Engineering,Secure layout and alarms,"Counters, screens, CCTV and panic alarms protect staff where needed.",Violence and aggression
+Control,Administrative,Cash kept to a minimum,"Cash in tills is kept low and banked at varied times, never alone.",
+Control,Administrative,Stress risk assessment,Stress risks are assessed against the HSE Management Standards.,Work-related stress
+Control,Administrative,Regular one-to-ones,Managers hold regular one-to-ones and monitor workload and hours.,Work-related stress
+Control,Administrative,Employee assistance,Staff can use an employee assistance programme or mental health first aiders.,Work-related stress
+Control,Administrative,Workstation assessments,Display screen users complete workstation assessments and adjustments are made.,Display screen equipment
+Control,Engineering,Adjustable chairs and screens,"Adjustable chairs, screen risers and other equipment are provided as needed.",Repetitive movements and posture; Display screen equipment
+Control,Administrative,Eye tests,Display screen users are offered eye tests and glasses for screen use when needed.,Display screen equipment
+Control,Administrative,Home working assessment,Home workers complete a home workstation and environment check.,
+Control,Administrative,Hand hygiene,"Hands are washed or sanitised before and after care, food handling and glove use.",Infection; Biological agents and body fluids; Food poisoning; Leptospirosis (Weil's disease)
+Control,PPE,Gloves and aprons,Disposable gloves and aprons are worn for contact with body fluids and changed between tasks.,Infection; Biological agents and body fluids
+Control,Administrative,Clinical waste segregated,"Clinical and offensive waste is segregated, stored securely and collected by a licensed carrier.",Infection; Biological agents and body fluids
+Control,Engineering,Sharps bins at point of use,"Sharps go straight into a sharps bin at the point of use, which is closed when three-quarters full.",Sharps and needlestick injuries
+Control,Substitution,Safer sharps,Safety-engineered needles and devices are used where practicable; needles are never re-sheathed.,Sharps and needlestick injuries
+Control,Administrative,Needlestick procedure,A needlestick and splash procedure is displayed and staff know to seek urgent advice.,Sharps and needlestick injuries
+Control,Administrative,Hepatitis B vaccination,Staff at risk are offered hepatitis B vaccination.,Sharps and needlestick injuries; Biological agents and body fluids
+Control,Administrative,Cleaning schedule,A cleaning schedule covers all areas and is signed off when complete.,Infection; Food poisoning
+Control,Administrative,Outbreak management,"Infection outbreaks are managed with isolation, enhanced cleaning and public health advice.",Infection
+Control,Administrative,Seasonal vaccination encouraged,Staff are encouraged to have flu and other seasonal vaccinations.,Infection
+Control,Administrative,Food safety management system,A food safety management system based on HACCP is followed and records kept.,Food poisoning
+Control,Administrative,Food hygiene training,Food handlers hold food hygiene training suited to their role.,Food poisoning; Food allergens
+Control,Administrative,Allergen information,"Allergens are recorded for every dish, and staff check with the kitchen before answering customers.",Food allergens
+Control,Engineering,Allergen controls in preparation,"Separate equipment, areas or cleaning stops cross-contamination for allergen-free orders.",Food allergens
+Control,Administrative,Temperatures monitored,"Fridge, freezer, cooking and hot-holding temperatures are checked and recorded.",Food poisoning
+Control,Administrative,Safe knife use,"Knives are sharp, the right size for the task, carried point down and stored in racks.",Knives and sharp utensils
+Control,PPE,Cut-resistant gloves,"Cut-resistant gloves are worn for boning, slicing or cleaning blades.",Cutting machinery and blades; Knives and sharp utensils
+Control,Engineering,Thermostatically controlled fryers,Fryers have thermostats and cut-outs; oil is changed cold or with a filter system.,
+Control,Administrative,Hot surfaces and liquids,"Oven gloves are used, pan handles turned in, and hot liquids carried with care.",Burns and scalds
+Control,Administrative,Gas Safe servicing,Gas appliances are installed and serviced by a Gas Safe registered engineer.,Gas appliances and carbon monoxide
+Control,Engineering,Gas interlock and ventilation,Commercial kitchen gas supplies are interlocked with the extraction system.,Gas appliances and carbon monoxide
+Control,Administrative,Extraction cleaned,"Canopies, filters and ductwork are cleaned regularly to prevent fat build-up.",
+Control,Administrative,Pool safety operating procedure,A pool safety operating procedure covers normal operation and emergencies.,Drowning
+Control,Administrative,Qualified lifeguards,Qualified lifeguards supervise the pool in line with the assessed numbers.,Drowning
+Control,Administrative,Pool chemicals managed,"Pool chemicals are handled by trained staff, stored apart and dosed automatically.",Pool and spa chemicals
+Control,Administrative,Water quality tested,Pool and spa water is tested several times a day and records kept.,Pool and spa chemicals
+Control,Engineering,Depth markings and signs,Water depths and pool rules are clearly displayed.,Drowning
+Control,Engineering,Rescue equipment,"Throw lines, poles or buoyancy aids are available near water.",Drowning
+Control,Administrative,Animal handling procedure,Animals are handled by experienced staff using suitable restraint and handling facilities.,Animal handling
+Control,Administrative,Zoonoses precautions,"Staff wash hands, cover cuts and wear protective clothing to prevent infections from animals.",Biological agents and body fluids; Animal handling
+Control,PPE,Protective clothing for animals,"Gauntlets, overalls and boots are worn where there is a risk of bites, kicks or scratches.",Animal handling
+Control,Engineering,Pens and races in good repair,"Pens, gates, races and crushes are kept in good repair and used for handling.",Animal handling
+Control,Administrative,Sun and weather protection,"Staff working outside have sun protection, water and suitable clothing for the weather.",Weather and sun exposure
+Control,Administrative,Leptospirosis precautions,"Staff cover cuts, wear gloves near water and rats, and carry a warning card.",Leptospirosis (Weil's disease)
+Control,Administrative,Certified pesticide users,Pesticides are applied only by certified users following the label and a spray record.,Pesticides and fertilisers
+Control,Administrative,Chainsaw certification,Chainsaws are used only by certificated operators wearing full chainsaw protection.,
+Control,PPE,Chainsaw protective clothing,"Chainsaw boots, trousers, gloves, helmet, visor and ear defenders are worn.",
+Control,Engineering,Debris guards and exclusion zones,"Mowers and strimmers have guards fitted, and others are kept a safe distance away.",Flying particles and debris
+Control,Elimination,Avoid entry,Confined spaces are not entered unless the work cannot be done from outside.,Confined spaces
+Control,Engineering,Atmosphere monitoring,The atmosphere is tested before and during entry with a calibrated gas detector.,Confined spaces
+Control,Engineering,Cylinders stored safely,"Gas cylinders are stored upright, chained, outdoors or in a ventilated store, with valves protected.",Gas cylinders; Oxygen and medical gases
+Control,Engineering,Cylinder trolleys,"Cylinders are moved on purpose-made trolleys, never rolled or dropped.",Gas cylinders
+Control,Engineering,Flashback arrestors,Oxy-fuel sets have flashback arrestors and hoses in good condition.,Gas cylinders
+Control,Administrative,Written scheme of examination,Pressure systems have a written scheme of examination and are examined by a competent person.,Pressure systems and compressed air
+Control,Engineering,Gas detection,Gas detectors with alarms monitor areas where gases could build up.,Flammable liquids and gases; Gas appliances and carbon monoxide
+Control,Administrative,Construction phase plan,A construction phase plan is in place and site rules are explained at induction.,
+Control,Engineering,Site secured,"The site is fenced and secured to keep out the public, especially children.",Members of the public and visitors
+Control,Engineering,Excavations supported,"Excavations are battered back or supported, inspected daily and protected with barriers.",Excavations
+Control,Administrative,Competent plant operators,"Plant is operated only by trained, certificated operators.",Mobile plant; Excavations
+Control,Administrative,Scaffold inspections,Scaffolds are erected by competent scaffolders and inspected every seven days and after bad weather.,Collapse of structures
+Control,PPE,Site PPE,"Hard hats, safety boots, hi-vis and gloves are worn on site.",Falling objects
+Control,Administrative,Traffic management plan,"A traffic management plan controls deliveries, plant and pedestrians on site.",Mobile plant
+Control,Engineering,Silica dust controlled,"Cutting stone, brick and concrete uses water suppression or extraction plus RPE.",Silica dust
+Control,Administrative,Public areas checked,Customer areas are checked through the day for hazards and cleaned as needed.,Members of the public and visitors
+Control,Engineering,Safety glass and manifestation,Glazing at low level is safety glass and large glass panels have visible markings.,Glass and glazing
+Control,Engineering,Window restrictors,Windows that vulnerable people can reach are fitted with tamper-proof restrictors.,
+Control,Administrative,Lifts maintained and examined,Passenger and goods lifts are maintained and thoroughly examined every six months.,
+Control,Administrative,Racking inspected,"Racking is installed to load limits, signed with capacities and inspected by a competent person.",Falling objects; Collapse of structures
+Control,Administrative,Delivery procedure,"Deliveries follow an agreed procedure, with drivers directed to a safe area.",Loading and unloading vehicles
+Control,Administrative,Care plans,Care plans record each person's needs and risks and are reviewed regularly.,Safeguarding vulnerable people; Falls by residents or service users
+Control,Administrative,Medicines policy,"Medicines are handled under a written policy by trained, competent staff.",Medicines
+Control,Administrative,Medication records,Medication given is recorded at the time on a MAR chart; errors are reported.,Medicines
+Control,Engineering,Medicines stored securely,"Medicines are stored securely at the right temperature, with controlled drugs double-locked.",Medicines
+Control,Administrative,Safeguarding procedures,Staff are trained in safeguarding and know how to raise concerns.,Safeguarding vulnerable people
+Control,Administrative,Recruitment checks,Staff working with vulnerable people or children have appropriate DBS and reference checks.,Safeguarding vulnerable people
+Control,Administrative,Bed rails assessed,Bed rails are used only after an individual assessment and checked for gaps and fit.,Falls by residents or service users
+Control,Administrative,Oxygen safety,"Oxygen is stored and used away from heat, flames and oils, with no-smoking signs.",Oxygen and medical gases
+Control,Administrative,Falls risk assessment,"Each person's falls risk is assessed and aids, alarms and checks are provided.",Falls by residents or service users
+Control,Administrative,Behaviour support plans,Behaviour support plans describe triggers and calming approaches for each person.,Violence and aggression
+Control,Administrative,Radiation protection adviser,"An RPA is appointed, local rules are written and controlled areas are defined.",Ionising radiation
+Control,Administrative,X-ray equipment tested,X-ray equipment is critically examined and quality-assured at set intervals.,Ionising radiation
+Control,Administrative,Laser local rules,"Lasers and IPL are used under local rules by trained operators, with the controlled area signed.",Lasers and intense light
+Control,PPE,Laser eyewear,Laser-specific eyewear is worn by operators and clients.,Lasers and intense light
+Control,Administrative,Crowd management plan,"Capacity, stewarding, routes and communication are planned for the event.",Crowds and events
+Control,Administrative,Liaison with authorities,"Licensing, emergency services and the venue are consulted before the event.",Crowds and events
+Control,Administrative,Temporary structures checked,"Stages, marquees and inflatables are erected to the supplier's instructions and checked before use.",Collapse of structures
+Control,Administrative,Inflatables tested and supervised,"Inflatables have a current PIPA or ADIPS tag, are anchored, and are supervised at all times.",
+Control,Administrative,Wind speed limits,Wind speeds are monitored and use stops above the manufacturer's limit.,Collapse of structures
+Control,Administrative,Gym inductions,Members complete an induction and health questionnaire before using the gym.,
+Control,Administrative,Fitness equipment serviced,Gym equipment is checked daily and serviced to the manufacturer's schedule.,
+Control,Administrative,Qualified instructors,Classes and coaching are led by qualified instructors with first aid cover.,
+Control,Engineering,Sauna and steam room controls,"Saunas and steam rooms have timers, guarded heaters, alarms and regular checks.",
+Control,Administrative,Golfer warnings,"Staff working on the course watch play, wait for golfers and wear hi-vis.",
+Control,Administrative,Tack checked,Riding equipment is checked before every ride and riders wear approved hats.,
+Control,PPE,Helmets,"Approved helmets are worn for riding, cycling, quad bikes and similar activities.",
+Control,Engineering,Baler interlocks,Balers and compactors have interlocked gates and are never entered while energised.,
+Control,Engineering,Conveyor guarding and stop wires,Conveyors have guards at nip points and pull-wire stops along picking lines.,
+Control,Administrative,Waste segregated,Waste is segregated and hazardous items removed before processing.,
+Control,Engineering,Dust suppression,Water sprays or misting systems suppress dust in yards and processing areas.,
+Control,Engineering,Safe battery charging,"Batteries are charged in a ventilated, fire-resistant area with approved chargers and not left charging overnight.",Lithium batteries
+Control,Administrative,High-voltage vehicle training,"Only trained technicians work on electric and hybrid vehicles, using insulated tools and isolation procedures.",
+Control,Administrative,Vehicle lifts examined,Vehicle lifts are thoroughly examined every six months and vehicles supported on axle stands.,
+Control,Engineering,Pit covers and barriers,Inspection pits are covered or barriered when not in use.,
+Control,Engineering,Tyre inflation cage,Split-rim and commercial tyres are inflated in a restraining cage with a remote gauge.,
+Control,Administrative,Roadside working,"Roadside work uses warning lights, cones, hi-vis and a safe position away from traffic.",
+Control,Administrative,Travel risk assessment,"Overseas travel is assessed for security, health and insurance, with an itinerary shared.",
+Control,Administrative,Health conditions supported,Staff with health conditions are supported with individual plans and reasonable adjustments.,Vulnerable workers
+Control,Administrative,Maintenance scope defined,A written brief sets out which simple tasks staff may do and which must go to a contractor.,
+Control,Elimination,"No gas, electrical or plumbing work","In-house staff never work on gas, electrical or water systems; faults are reported to the helpdesk.",
+Control,Elimination,No drilling into walls,"Staff do not drill into walls, floors or ceilings; existing fixings are used.",
+Control,Engineering,Kitchen layout and ventilation,"The kitchen has enough space, non-slip flooring and canopy extraction over cooking equipment.",
+Control,Engineering,Cellar access safe,Cellar hatches have guard rails when open and stairs have handrails and good lighting.,
+Control,Engineering,CO2 monitoring in cellars,Cellars with gas cylinders have CO2 and oxygen depletion alarms.,
+Control,Administrative,Beer line cleaning procedure,"Line cleaner is used to the supplier's method, with lines flushed and taps labelled during cleaning.",
+Control,Administrative,Glasswasher use,"Glasswashers are allowed to cool before unloading, and chemicals are fed by automatic dosing.",
+Control,Administrative,Cleaning chemicals controlled,"Cleaning chemicals are diluted correctly, never mixed, and used with gloves and eye protection.",
+Control,Substitution,Housekeeping trolleys,Housekeeping trolleys are used and kept under weight limits; linen bags are not overfilled.,
+Control,Administrative,Bed making technique,"Beds are made using good posture, working around the bed instead of overreaching.",
+Control,Administrative,Laundry handled safely,"Soiled linen is bagged at source, washed at disinfection temperatures and kept apart from clean linen.",
+Control,Administrative,Spa pool operation,"Spa pools are disinfected, filtered and tested to HSE guidance, with bathing load and session times limited.",
+Control,Administrative,Bath water temperature checked,Bath and shower water is checked with a thermometer before the person gets in (no hotter than 44°C).,
+Control,Engineering,Dementia-friendly environment,"Signage, lighting, colour contrast and secure garden access help people with dementia move safely.",
+Control,Administrative,Seizure management plans,People with epilepsy have a seizure management plan and staff are trained in emergency medication.,
+Control,Engineering,Changing units with steps,"Changing units have steps so children can climb up, avoiding lifting from the floor.",
+Control,Administrative,Staffing ratios,Staff-to-child or staff-to-client ratios meet the required levels at all times.,
+Control,Administrative,Play equipment inspected,Play equipment and surfaces are checked daily and inspected annually by a competent inspector.,
+Control,Administrative,Off-site visit plan,"Trips are planned and approved, with consent, ratios, first aid and emergency contacts in place.",
+Control,Administrative,Science practicals controlled,"Practicals follow CLEAPSS guidance, are prepared by technicians and supervised by teachers.",
+Control,Engineering,Kiln controls,"Kilns have interlocks or are in a locked area, with ventilation and warning signs while firing.",
+Control,Administrative,Workshop rules for pupils,"Pupils use machines only after instruction, under supervision, with guards and eye protection.",
+Control,Administrative,Amalgam and mercury controlled,"Encapsulated amalgam is used, separators fitted, and spill kits available.",
+Control,Administrative,Instrument decontamination,"Instruments are decontaminated and sterilised following national guidance, with autoclave records.",
+Control,Administrative,Cytotoxic drugs handled safely,Cytotoxic drugs are prepared and disposed of using closed systems and specific PPE.,
+Control,Engineering,Anaesthetic gas scavenging,Anaesthetic gases are scavenged and equipment leak-checked.,
+Control,Administrative,Skin sensitivity tests,Patch or skin sensitivity tests are done 48 hours before colour and certain treatments.,
+Control,Administrative,Client consultation,A consultation and medical history check is completed before each treatment.,
+Control,Administrative,Qualified practitioners,"Treatments are carried out only by suitably qualified and insured practitioners, with a prescriber where required.",
+Control,Engineering,Solvent controls,"Dry cleaning machines are closed-loop, maintained, and solvent stored and disposed of safely.",
+Control,Engineering,Safe roof access,"Access to roofs is by a secured ladder or tower, with edge protection at the access point.",
+Control,Administrative,Scaffold tagged,Scaffolds carry a tag showing the latest inspection and are not altered by anyone except scaffolders.,
+Control,Administrative,Disc cutters controlled,"Disc cutters are used by trained operators with the correct blade, guard and water suppression.",
+Control,Substitution,Low-level platforms for decorating,Hop-ups and podiums are used instead of chairs or trestles.,
+Control,Administrative,Water and heating isolated,"Systems are isolated, drained and cooled before work, and soldering uses a heat mat.",
+Control,Substitution,Glass lifting equipment,"Glass is moved with suction lifters and A-frames, and cut-resistant gloves and sleeves are worn.",
+Control,Engineering,Wood dust extraction,Woodworking machines are connected to extraction that is examined every 14 months.,
+Control,Engineering,Braked machines,Woodworking machines with run-down times over 10 seconds are fitted with brakes.,
+Control,Engineering,Welding screens and fume extraction,Welding bays have screens and on-torch or local fume extraction.,
+Control,PPE,Welding PPE,"Welding helmets with the right filter, leather gloves and flame-resistant clothing are worn.",
+Control,Administrative,Metalworking fluids managed,"Fluid concentration and bacteria are checked weekly, and machines have splash guards and mist extraction.",
+Control,PPE,Shot blasting PPE,"Blasters wear air-fed helmets and protective suits, and cabinets are kept sealed.",
+Control,Engineering,Mixer bowl guards,Mixers have interlocked bowl guards; bowls are never reached into while moving.,
+Control,Engineering,Flour dust controlled,"Flour is added slowly, mixers start at low speed and dust is cleaned by vacuum, not brushing.",
+Control,Administrative,Tail lifts used safely,Tail lifts are thoroughly examined every six months; loads are secured and operators stand clear of edges.,
+Control,Administrative,Coupling procedure,Drivers follow a coupling procedure including tug test and parking brake checks.,
+Control,Engineering,Cab access steps,Drivers use steps and handholds facing the vehicle; no jumping from cabs or trailers.,
+Control,Engineering,Roll-over protection,Tractors have roll-over protection and seat belts are worn; quad bikes have helmets and training.,
+Control,Engineering,PTO guards,PTO shafts are fully guarded and machinery is switched off before clearing blockages.,
+Control,Administrative,Safe stop,"Before leaving a vehicle or clearing machinery: handbrake on, controls neutral, engine off, key out.",
+Control,Elimination,No entry into grain bins,"Grain bins are not entered while emptying; entry needs a permit, harness and standby person.",
+Control,Engineering,Shed ventilation,Poultry sheds are ventilated and ammonia levels checked before work.,
+Control,Administrative,Tree climbing teams,Tree climbing needs a minimum of two trained people with an aerial rescue plan.,
+Control,Engineering,Chipper safety,"Chippers are fed from the side, with feed controls tested and nobody reaching into the chute.",
+Control,Administrative,Golf buggy rules,"Buggies are driven only on approved paths by authorised drivers, with passenger limits.",
+Control,Administrative,Quad and Segway training,Riders receive training and a safety briefing and stay within marked routes.,
+Control,Engineering,Stable and yard layout,"Stables have wide doors, secure fittings and non-slip yards.",
+Control,Engineering,Accessible routes,"Routes, ramps and facilities are accessible to people with disabilities.",Fire
+Control,Administrative,Cashing-up procedure,"Cash is counted out of public view, in a secure room, with two people where possible.",
+Control,Engineering,Mezzanine edge protection,"Mezzanine floors have guard rails, signed load limits and gated loading points.",
+Control,Administrative,Hot drinks equipment,"Coffee machines are maintained, steam wands purged away from the body and descaled to schedule.",
+Control,Engineering,Mechanical sheeting,Skips and RoRo containers are sheeted with mechanical systems or from a sheeting gantry.,
+Control,Engineering,Shear controls and guarding,"Shears have guards, two-hand or remote controls and are fed with handling equipment.",
+Control,Administrative,Hazardous waste procedure,"Hazardous items found in waste are isolated, labelled and stored for specialist disposal.",
+Control,Administrative,Pre-travel briefing,"Travellers are briefed on local risks, vaccinations and emergency contacts before departure.",
+Control,Administrative,Event planning and alcohol,"Social events are planned with safe transport home, sensible alcohol provision and a responsible host.",
+Control,Engineering,Safety signs at water,"No-diving and depth signs, and life-saving equipment, are provided at the water's edge.",
+Control,Engineering,Powered gate safety devices,"Powered gates have safety edges, photocells and force limits, tested at each service.",
+Control,Administrative,Crane and lifting gear examined,Overhead cranes and lifting accessories are thoroughly examined and operators trained.,
+Control,Substitution,Mechanical post drivers,Post drivers and augers are used with guards and hearing protection instead of manual rammers where possible.,
+Control,Administrative,Cleaning machines used safely,"Cleaning machines are checked, cables managed, and wet areas signed until dry.",
+Control,Administrative,Fogging procedure,"Rooms are cleared and sealed, smoke detectors isolated, and re-entry delayed until the product has settled.",
+Control,Administrative,Exhibition build plan,"Stand building follows the organiser's rules, with materials fire-rated and work at height planned.",
+Control,Administrative,Car park duties,"Car park staff wear hi-vis, stand in safe positions and use agreed hand signals.",
+Control,Administrative,Agency and host liaison,The host provides a site induction and the agency confirms the worker is trained for the role.,
+Control,Administrative,Home workers kept in contact,Home workers have regular contact with their manager and a way to report problems.,
