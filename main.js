@@ -20,7 +20,7 @@ function render() {
 window.__render = render;
 
 function loginView(msg) {
-  root.innerHTML = `<div class="auth"><div class="l"><img src="assets/logo-dark-bg.png" alt="${esc(COMPANY)} — Safety made easy"><div><h1>${esc(PORTAL)}</h1><p style="max-width:42ch;color:#cfe0de">Risk assessments, control measures and staff sign-offs in one place. Clients see their own published risk assessments and sign them online.</p></div><span style="font-size:13px;color:#7fa3a0">© ${new Date().getFullYear()} ${esc(COMPANY)}</span></div>
+  root.innerHTML = `<div class="auth"><div class="l"><img src="logo-dark-bg.png" alt="${esc(COMPANY)} — Safety made easy"><div><h1>${esc(PORTAL)}</h1><p style="max-width:42ch;color:#cfe0de">Risk assessments, control measures and staff sign-offs in one place. Clients see their own published risk assessments and sign them online.</p></div><span style="font-size:13px;color:#7fa3a0">© ${new Date().getFullYear()} ${esc(COMPANY)}</span></div>
   <div class="r"><form id="login"><h2 style="font-size:24px">Sign in</h2><p class="muted" style="margin:0">Enter your work email. We'll email you a secure sign-in link — no password needed.</p>
   <label>Email<input id="lg-e" type="email" autocomplete="email" required></label><button class="btn pri" type="submit">Email me a sign-in link</button>
   ${msg ? `<p class="stmt" style="margin:0">${msg}</p>` : ''}</form></div></div>`;
@@ -34,7 +34,7 @@ function loginView(msg) {
   };
 }
 function noAccessView() {
-  root.innerHTML = `<div class="auth"><div class="l"><img src="assets/logo-dark-bg.png" alt="${esc(COMPANY)}"><div></div><span></span></div><div class="r"><div style="max-width:420px"><h2>Your account isn't set up yet</h2>
+  root.innerHTML = `<div class="auth"><div class="l"><img src="logo-dark-bg.png" alt="${esc(COMPANY)}"><div></div><span></span></div><div class="r"><div style="max-width:420px"><h2>Your account isn't set up yet</h2>
   <p class="muted">You're signed in as <b>${esc(me.email)}</b>, but this email hasn't been given access. Ask your manager or ${esc(COMPANY)} to add you, then sign in again.</p><button class="btn" data-act="signout">Sign out</button></div></div></div>`;
 }
 
@@ -44,7 +44,7 @@ async function start(session) {
   if (error) { root.innerHTML = `<div class="boot"><p>Couldn't load your profile: ${esc(error.message)}</p></div>`; return; }
   me = data || { id: session.user.id, email: session.user.email, role: 'none' };
   if (me.role === 'none') return noAccessView();
-  root.innerHTML = '<div class="boot"><img src="assets/logo-light-bg.png" alt="" width="220"><p>Loading your data…</p></div>';
+  root.innerHTML = '<div class="boot"><img src="logo-light-bg.png" alt="" width="220"><p>Loading your data…</p></div>';
   try { me.role === 'admin' ? await loadAdmin(me) : await loadPortal(me); }
   catch (e) { root.innerHTML = `<div class="boot"><p>Couldn't load data: ${esc(e.message)}</p></div>`; return; }
   ready = true; render();

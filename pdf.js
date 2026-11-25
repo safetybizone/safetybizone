@@ -6,7 +6,7 @@ const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), pa
 let logoData = null;
 async function logo() {
   if (logoData) return logoData;
-  const r = await fetch('assets/logo-light-bg.png'); const b = await r.blob();
+  const r = await fetch('logo-light-bg.png'); const b = await r.blob();
   logoData = await new Promise((res) => { const f = new FileReader(); f.onload = () => res(f.result); f.readAsDataURL(b); });
   return logoData;
 }
