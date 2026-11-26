@@ -5,7 +5,10 @@ The Safetybiz risk assessment platform and client portal.
 - **Safetybiz administrators** onboard clients (head office and sites), build risk assessments from the Safetybiz topic library and the hazard and control registers, rate risk on a 5×5 matrix, raise actions, run audits, publish to the client portal and keep every record.
 - **Superadmins** (Safetybiz) can also add and remove administrators, delete clients and edit the topic library.
 - **Company administrators** are linked to one client company. They build, edit and publish that company's risk assessments, add sites and staff, keep certificates, collect sign-offs (online or in person on a tablet) and export the acknowledgement record. They never see another company.
-- **Client staff** see the assessments for their site, read them and sign.
+- **Regional and area managers** are linked to a brand, region or area of one company and see only the sites beneath it. They close and raise actions, upload certificates, record sign-offs, update site details and add staff; they do not edit risk assessments.
+- **Client staff** see the assessments for their site, read them and sign. Their home page lists what they need to do.
+- **Brand masters**: one assessment written for a brand, copied to its sites and updated from the master later (each site keeps its own answers and additions).
+- **Food hygiene**: each site can be linked to its Food Standards Agency listing to show the live rating.
 - PDF export of full risk assessments (laid out like the familiar printed format) and of sign-off records with signatures.
 
 Security is enforced by the database itself (Postgres row-level security), not by the browser: a client can never read another client's data, drafts, registers or internal history, and sign-offs, audits and the activity log cannot be edited or deleted by anyone through the app.
@@ -20,6 +23,9 @@ Security is enforced by the database itself (Postgres row-level security), not b
 | `migration-002-hazard-sections.sql` | Hazard sections: controls, risk score, people affected and actions per hazard; summary and signed approval. |
 | `migration-003-compliance-centre.sql` | Compliance centre: certificate types, site documents and the private `compliance` file store. |
 | `migration-004-roles-and-copy.sql` | Superadmins, and company administrators who build their own company's assessments. |
+| `migration-005-food-hygiene.sql` | Live Food Standards Agency hygiene rating on each site profile, with rating history. |
+| `migration-006-structure.sql` | Brand → Region → Area structure, regional and area managers, and brand master assessments. |
+| `functions/fsa/index.ts` | Edge function `fsa` that looks up food hygiene ratings (deploy with JWT verification on). |
 | `seed.sql` | The Safetybiz starter library: 184 topics, 70 hazards, 317 controls. |
 | `topic-library.csv`, `registers.csv` | The library as spreadsheets, for review. |
 
@@ -28,7 +34,7 @@ Security is enforced by the database itself (Postgres row-level security), not b
 ### 1. Create the Supabase project
 1. Sign up at [supabase.com](https://supabase.com) and create a new project (choose the London region for UK data).
 2. Open **SQL Editor → New query**, paste the whole of `schema.sql` and press **Run**. If Supabase warns about tables without Row Level Security, choose **Run without RLS**: the script switches it on for every table further down.
-3. New query: paste `hardening.sql` and **Run**. Then do the same with `migration-002-hazard-sections.sql`, `migration-003-compliance-centre.sql` and `migration-004-roles-and-copy.sql`, in that order.
+3. New query: paste `hardening.sql` and **Run**. Then do the same with `migration-002-hazard-sections.sql`, `migration-003-compliance-centre.sql`, `migration-004-roles-and-copy.sql`, `migration-005-food-hygiene.sql` and `migration-006-structure.sql`, in that order. Deploy the edge function in `functions/fsa`.
 4. New query again: paste `seed.sql` and **Run** to load the Safetybiz library.
 5. Add yourself as the first administrator (new query, change the email and name):
    ```sql
