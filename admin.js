@@ -5,27 +5,39 @@ import {
   fetchAll, rows, byId, ins, upd, del, queue, niceError, field, area, sel, shell, signFormHTML, mountPad, submitSignOff, onRerender,
 } from './core.js';
 import { assessmentPDF, signOffsPDF, ctlScore, pct } from './pdf.js';
-import { ccView, ccClick, ccTotals, ccAttention } from './compliance.js';
+import { ccView, ccClick, ccTotals, ccAttention, fhrsChip, fhrsLow, fhrsRefreshStale } from './compliance.js';
 
-const S = { me: null, sel: new Set(), ccClient: '', q: '', fClient: '', fStatus: '', af: 'open', draft: null, logs: {}, sigs: {}, hq: '', hcat: '', cq: '', so: {}, tq: '', tsec: '' };
+const S = { me: null, asCo: null, sel: new Set(), ccClient: '', q: '', fClient: '', fStatus: '', af: 'open', draft: null, logs: {}, sigs: {}, hq: '', hcat: '', cq: '', so: {}, tq: '', tsec: '' };
 let route = [];
 // Company administrators (client_admin) use this same builder, limited by the database to their own company.
-const CO = () => S.me.role === 'client_admin';
-const SUPER = () => S.me.role === 'admin' && !!S.me.is_super;
-const myCo = () => S.me.client_id;
+// A Safetybiz admin can "Open as company" (S.asCo): the builder then shows only that company, as its administrator sees it.
+const CO = () => S.me.role === 'client_admin' || !!S.asCo;
+const SUPER = () => S.me.role === 'admin' && !!S.me.is_super && !S.asCo;
+const myCo = () => S.asCo || S.me.client_id;
 
 // ---------- load ----------
 export async function loadAdmin(me) {
   S.me = me;
   const ackCols = 'id,assessment_id,version,user_id,email,full_name,job_title,method,site_id,statement,acknowledged_at';
-  const [clients, sites, invites, profiles, hreg, creg, hrc, ras, hz, ctl, acts, audits, pubs, acks, topics, thz, tct, cdt, sdocs] = await Promise.all([
+  const [clients, sites, invites, profiles, hreg, creg, hrc, ras, hz, ctl, acts, audits, pubs, acks, topics, thz, tct, cdt, sdocs, fhist, units] = await Promise.all([
     fetchAll('clients'), fetchAll('sites'), fetchAll('portal_invites'), fetchAll('profiles'), fetchAll('hazard_register'), fetchAll('control_register'),
     fetchAll('hazard_register_controls'), fetchAll('assessments'), fetchAll('assessment_hazards'), fetchAll('assessment_controls'), fetchAll('actions'),
     fetchAll('audits'), fetchAll('published_assessments', 'id,assessment_id,client_id,site_id,version,note,published_at,published_by'), fetchAll('acknowledgements', ackCols),
     fetchAll('topic_library'), fetchAll('topic_hazards'), fetchAll('topic_controls'), fetchAll('compliance_doc_types'), fetchAll('site_documents'),
+    fetchAll('site_fhrs_history'), fetchAll('org_units'),
   ]);
   Object.assign(D, { clients, sites, portal_invites: invites, profiles, hazard_register: hreg, control_register: creg, hazard_register_controls: hrc, assessments: ras,
-    assessment_hazards: hz, assessment_controls: ctl, actions: acts, audits, published_assessments: pubs, acknowledgements: acks, topic_library: topics, topic_hazards: thz, topic_controls: tct, compliance_doc_types: cdt, site_documents: sdocs });
+    assessment_hazards: hz, assessment_controls: ctl, actions: acts, audits, published_assessments: pubs, acknowledgements: acks, topic_library: topics, topic_hazards: thz, topic_controls: tct, compliance_doc_types: cdt, site_documents: sdocs, site_fhrs_history: fhist, org_units: units });
+  if (S.asCo) viewAs(S.asCo);
+}
+// Keep only one company's records in memory (Open as company).
+function viewAs(cid) {
+  const raIds = new Set(rows('assessments').filter((a) => a.client_id === cid).map((a) => a.id));
+  const byClient = ['clients', 'sites', 'org_units', 'portal_invites', 'assessments', 'published_assessments', 'site_documents', 'site_fhrs_history'];
+  byClient.forEach((t) => (D[t] = rows(t).filter((r) => (t === 'clients' ? r.id : r.client_id) === cid)));
+  ['assessment_hazards', 'assessment_controls', 'actions', 'audits', 'acknowledgements'].forEach((t) => (D[t] = rows(t).filter((r) => raIds.has(r.assessment_id))));
+  D.profiles = rows('profiles').filter((p) => p.client_id === cid || p.id === S.me.id);
+  S.sel.clear(); S.fClient = ''; S.so = {};
 }
 
 // ---------- lookups ----------
@@ -44,6 +56,31 @@ const ratingLine = (a) => `${chip(scoreOf(a, 'res'), true)}<div class="muted" st
 const pubTag = (a) => (a.published_version ? `<span class="tag ok">Published v${a.published_version}</span>` : '<span class="tag">Not published</span>');
 const statusTag = (s) => `<span class="tag${s === 'Active' ? ' ok' : s === 'Under review' ? ' warn' : ''}">${esc(s)}</span>`;
 const empty = (h, p, btn = '') => `<div class="empty"><h3>${h}</h3><p class="muted">${p}</p>${btn}</div>`;
+
+// ---------- company structure (brand → region → area → site) ----------
+const KIND = { brand: 'Brand', region: 'Region', area: 'Area' };
+const MGR_TITLE = { brand: 'Brand manager', region: 'Regional manager', area: 'Area manager' };
+const units = (cid) => rows('org_units').filter((u) => u.client_id === cid);
+const kids = (uid, cid) => units(cid).filter((u) => (u.parent_id || null) === (uid || null)).sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name));
+function unitTree(cid) { const out = []; const walk = (pid, d) => kids(pid, cid).forEach((u) => { out.push([u, d]); walk(u.id, d + 1); }); walk(null, 0); return out; }
+const unitDesc = (uid) => { const ids = new Set([uid]); let grew = true; while (grew) { grew = false; rows('org_units').forEach((u) => { if (u.parent_id && ids.has(u.parent_id) && !ids.has(u.id)) { ids.add(u.id); grew = true; } }); } return ids; };
+const unitSites = (uid) => { const ids = unitDesc(uid); return rows('sites').filter((s) => s.unit_id && ids.has(s.unit_id)); };
+const unitPath = (uid) => { const p = []; let u = byId('org_units', uid); while (u) { p.unshift(u.name || KIND[u.kind]); u = byId('org_units', u.parent_id); } return p.join(' › '); };
+const unitOpts = (cid, blank = 'Not grouped') => [['', blank]].concat(unitTree(cid).map(([u, d]) => [u.id, '  '.repeat(d) + (u.name || 'Untitled') + ' (' + KIND[u.kind].toLowerCase() + ')']));
+const mgrLabel = (i) => { const u = byId('org_units', i.unit_id); return u ? `${MGR_TITLE[u.kind]} · ${u.name}` : 'Manager'; };
+// Where an assessment lives: a site, or a brand (master).
+const raWhere = (a) => (a.is_master ? `Brand master · ${byId('org_units', a.unit_id)?.name || 'brand'}` : sName(a.site_id));
+const copiesOf = (mid) => rows('assessments').filter((x) => x.master_id === mid);
+function structurePanel(cid) {
+  const tree = unitTree(cid), mgrs = rows('portal_invites').filter((i) => i.client_id === cid && i.role === 'manager');
+  return `<div class="panel"><div class="sect"><div><h3>Brands, regions and areas</h3><p class="hint">Group the sites so regional and area managers see only the shops under them. Any level can be skipped.</p></div>
+  <div class="row"><button class="btn sm" data-act="unitAdd" data-c="${cid}" data-k="brand">+ Brand</button><button class="btn sm" data-act="unitAdd" data-c="${cid}" data-k="region">+ Region</button><button class="btn sm" data-act="unitAdd" data-c="${cid}" data-k="area">+ Area</button></div></div>
+  ${tree.length ? `<div class="tree">${tree.map(([u, d]) => { const n = unitSites(u.id).length, m = mgrs.filter((i) => unitDesc(u.id).has(i.unit_id) && i.unit_id === u.id);
+    return `<div class="tn" style="margin-left:${d * 26}px"><span class="tag k-${u.kind}">${KIND[u.kind]}</span><input id="u-${u.id}-n" data-b="org_units|${u.id}|name" value="${esc(u.name)}" aria-label="${KIND[u.kind]} name">
+    <span class="muted">${n} site${n === 1 ? '' : 's'}${m.length ? ' · ' + m.map((i) => esc(i.full_name || i.email)).join(', ') : ''}</span>
+    <div class="row sp" style="flex-wrap:nowrap">${u.kind === 'brand' ? `<button class="btn sm ghost" data-act="unitAdd" data-c="${cid}" data-k="region" data-p="${u.id}">+ Region</button>` : ''}${u.kind !== 'area' ? `<button class="btn sm ghost" data-act="unitAdd" data-c="${cid}" data-k="area" data-p="${u.id}">+ Area</button>` : ''}<button class="btn sm ghost" data-act="unitDel" data-id="${u.id}" aria-label="Remove">✕</button></div></div>`; }).join('')}</div>`
+    : '<p class="muted" style="margin:0">No structure yet. Start with a brand, or a region if the company has only one brand.</p>'}</div>`;
+}
 
 // people who can see an assessment in the portal
 function audienceFor(a) {
@@ -86,20 +123,22 @@ export function adminView(r) {
   else if (p0 === 'signoffs') { active = 'signoffs'; title = 'Sign-offs'; body = vSignoffs(); }
   else if (p0 === 'team') { active = 'team'; title = 'Team and administrators'; body = vTeam(); }
   else body = vDash();
-  return shell({ nav, active, title, body, me: { group: CO() ? (byId('clients', myCo())?.name || 'COMPANY').toUpperCase() : 'RISK MANAGEMENT', name: S.me.full_name || S.me.email, sub: CO() ? 'Company administrator' : SUPER() ? 'Superadmin' : 'Administrator' } });
+  const right = S.asCo ? `<span class="asbar">Viewing as <b>${esc(cName(S.asCo))}</b> — what their company administrator sees<button class="btn sm" data-act="exitAs">Exit</button></span>` : '';
+  return shell({ nav, active, title, body, right, me: { group: CO() ? (byId('clients', myCo())?.name || 'COMPANY').toUpperCase() : 'RISK MANAGEMENT', name: S.me.full_name || S.me.email, sub: CO() ? 'Company administrator' : SUPER() ? 'Superadmin' : 'Administrator' } });
 }
 
 // ---------- dashboard ----------
 function vDash() {
-  const L = live(), acts = rows('actions').filter((x) => byId('assessments', x.assessment_id)?.status !== 'Archived');
+  const L = live().filter((a) => !a.is_master), acts = rows('actions').filter((x) => byId('assessments', x.assessment_id)?.status !== 'Archived');
   const soon = addDays(today(), 30), month = addDays(today(), -30);
   const od = acts.filter(isOd), due = L.filter((a) => a.review_date && a.review_date <= soon).sort((a, b) => a.review_date.localeCompare(b.review_date));
   const hi = [...L].filter((a) => scoreOf(a, 'res') || scoreOf(a, 'init')).sort((a, b) => (scoreOf(b, 'res') || scoreOf(b, 'init')) - (scoreOf(a, 'res') || scoreOf(a, 'init'))).slice(0, 6);
-  const cc = ccTotals(rows('sites').map((x) => x.id)), ccAtt = ccAttention(rows('sites').map((x) => x.id), 4);
+  const cc = ccTotals(rows('sites').map((x) => x.id)), ccAtt = ccAttention(rows('sites').map((x) => x.id), 4), lowF = fhrsLow(rows('sites').map((x) => x.id));
+  fhrsRefreshStale(rows('sites'));
   const recent = [...rows('acknowledgements')].sort((a, b) => b.acknowledged_at.localeCompare(a.acknowledged_at)).slice(0, 6);
   const st = [CO() ? [rows('sites').length, 'Sites'] : [rows('clients').length, 'Clients'], [L.length, 'Live risk assessments'], [L.filter((a) => scoreOf(a, 'res') >= 10).length, 'High risk with controls', 1],
     [acts.filter((x) => x.status !== 'Done').length, 'Open actions'], [od.length, 'Overdue actions', 1], [due.length, 'Renewals due in 30 days', 1],
-    [rows('acknowledgements').filter((a) => a.acknowledged_at >= month).length, 'Sign-offs in last 30 days'], [cc.Expired, 'Certificates expired', 1], [cc['Due soon'], 'Certificates due in 30 days', 1]];
+    [rows('acknowledgements').filter((a) => a.acknowledged_at >= month).length, 'Sign-offs in last 30 days'], [cc.Expired, 'Certificates expired', 1], [cc['Due soon'], 'Certificates due in 30 days', 1], [lowF.length, 'Food hygiene 2 or below', 1]];
   const st1 = `<div class="stats">${st.map(([n, l, al]) => `<div class="stat${al && n ? ' alert' : ''}"><span>${l}</span><b>${n}</b></div>`).join('')}</div>`;
   if (!rows('clients').length) return `<div class="page">${st1}${empty('Start by onboarding a client', 'Add the client\'s head office and sites, then create risk assessments for them from your hazard and control registers.', '<button class="btn pri" data-act="onboard">+ Onboard a client</button>')}</div>`;
   return `<div class="page"><div class="sect"><div><h2>Risk overview</h2><p class="muted" style="margin:4px 0 0">${CO() ? 'Your sites, highest risks' : 'Every client, their highest risks'} and what needs doing next.</p></div><div class="row">${CO() ? '' : '<button class="btn" data-act="onboard">+ Onboard client</button>'}<button class="btn pri" data-act="newRA">+ Create risk assessment</button></div></div>${st1}
@@ -108,7 +147,8 @@ function vDash() {
   ${due.slice(0, 4).map((a) => `<a class="li" href="#/ra/${a.id}/details"><span class="tag warn">Renewal</span><span><b>${esc(a.title || 'Untitled')}</b><br><span class="muted">${a.review_date < today() ? 'Was due' : 'Due'} ${fd(a.review_date)} · ${esc(cName(a.client_id))}</span></span></a>`).join('')}
   ${L.filter((a) => !a.published_version && a.status === 'Active').slice(0, 3).map((a) => `<a class="li" href="#/ra/${a.id}/publish"><span class="tag">Unpublished</span><span><b>${esc(a.title || 'Untitled')}</b><br><span class="muted">Active but ${CO() ? 'staff' : 'the client'} can't see it yet</span></span></a>`).join('')}
   ${ccAtt.map(({ sid, t, d, s: st }) => { const site = byId('sites', sid); return `<a class="li" href="#/compliance/${sid}"><span class="tag ${st === 'Expired' ? 'bad' : 'warn'}">${st === 'Expired' ? 'Expired' : 'Due soon'}</span><span><b>${esc(t.name)}</b><br><span class="muted">${esc(cName(site?.client_id))} · ${esc(site?.name)} · ${fd(d.expiry_date)}</span></span></a>`; }).join('')}
-  ${!od.length && !due.length && !ccAtt.length ? '<p class="muted">Nothing overdue, no renewals and no certificates due in the next 30 days.</p>' : ''}</div></div>
+  ${lowF.slice(0, 4).map((st) => `<a class="li" href="#/compliance/${st.id}">${fhrsChip(st)}<span><b>Food hygiene rating</b><br><span class="muted">${esc(cName(st.client_id))} · ${esc(st.name)} · inspected ${fd(st.fhrs.ratingDate)}</span></span></a>`).join('')}
+  ${!od.length && !due.length && !ccAtt.length && !lowF.length ? '<p class="muted">Nothing overdue, no renewals and no certificates due in the next 30 days.</p>' : ''}</div></div>
   <div class="panel"><div class="sect"><h3>Latest sign-offs</h3><a class="btn sm" href="#/signoffs">All sign-offs</a></div>${recent.length ? recent.map((k) => { const a = byId('assessments', k.assessment_id); return `<a class="li" href="#/ra/${k.assessment_id}/publish"><span class="tag ok">Signed</span><span><b>${esc(k.full_name)}</b>${k.job_title ? ', ' + esc(k.job_title) : ''}<br><span class="muted">${esc(a?.title || '')} v${k.version} · ${esc(cName(a?.client_id))} · ${ft(k.acknowledged_at)}${k.method === 'In person' ? ' · in person' : ''}</span></span></a>`; }).join('') : '<p class="muted">No sign-offs yet. Publish an assessment and invite the client\'s staff.</p>'}</div></div>`;
 }
 
@@ -155,21 +195,25 @@ function vClient(id) {
   const joined = (email) => rows('profiles').some((p) => p.email === email);
   const portal = location.origin + location.pathname;
   return `<div class="page">${CO() ? '' : '<a class="btn sm ghost" href="#/clients">← All clients</a>'}
-  <div class="sect" style="margin-top:8px"><h2>${esc(c.name)}</h2><div class="row"><button class="btn" data-act="newRA" data-client="${id}">+ Create risk assessment</button>${SUPER() ? `<button class="btn dng" data-act="delClient" data-id="${id}">Delete client</button>` : ''}</div></div>
+  <div class="sect" style="margin-top:8px"><h2>${esc(c.name)}</h2><div class="row"><button class="btn" data-act="newRA" data-client="${id}">+ Create risk assessment</button>${CO() ? '' : `<button class="btn teal" data-act="openAs" data-id="${id}">Open as company</button>`}${SUPER() ? `<button class="btn dng" data-act="delClient" data-id="${id}">Delete client</button>` : ''}</div></div>
   <div class="panel"><h3 style="font-size:16px;margin-bottom:12px">Head office and contact</h3><div class="g2">${field(`clients|${id}|name`, c.name, 'Company name')}${field(`clients|${id}|contact_name`, c.contact_name, 'Contact name')}${field(`clients|${id}|contact_email`, c.contact_email, 'Contact email', 'email')}${field(`clients|${id}|phone`, c.phone, 'Phone')}${area(`clients|${id}|notes`, c.notes, 'Notes', ' class="full"')}</div></div>
+  ${structurePanel(id)}
   <div class="panel"><div class="sect"><h3>Sites</h3><button class="btn sm" data-act="addSite" data-id="${id}">+ Add site</button></div>
-  <div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Address</th><th>Site contact</th><th>Phone</th><th>Assessments</th><th>Compliance</th><th></th></tr></thead><tbody>${sites.map((s) => `<tr><td data-l="Site"><input id="s-${s.id}-n" data-b="sites|${s.id}|name" value="${esc(s.name)}" aria-label="Site name">${s.is_head_office ? '<span class="muted">Head office</span>' : ''}</td><td data-l="Address"><input id="s-${s.id}-a" data-b="sites|${s.id}|address" value="${esc(s.address)}" aria-label="Address"></td><td data-l="Site contact"><input id="s-${s.id}-c" data-b="sites|${s.id}|site_contact" value="${esc(s.site_contact)}" aria-label="Site contact"></td><td data-l="Phone"><input id="s-${s.id}-p" data-b="sites|${s.id}|phone" value="${esc(s.phone)}" aria-label="Phone"></td><td data-l="Assessments">${ras.filter((a) => a.site_id === s.id).length}</td><td data-l="Compliance"><a class="btn sm" href="#/compliance/${s.id}">Certificates</a></td><td>${s.is_head_office || CO() ? '' : `<button class="btn sm ghost" data-act="delSite" data-id="${s.id}" aria-label="Remove site">✕</button>`}</td></tr>`).join('')}</tbody></table></div></div>
-  <div class="panel"><div class="sect"><div><h3>${CO() ? 'Company administrators and staff' : 'Company administrators and staff'}</h3><p class="hint">Company administrators build and publish this company's risk assessments, manage staff and keep the sign-off records. Staff see their site (or all sites) and sign. Portal address: <b>${esc(portal)}</b> <button class="btn sm" data-act="copy" data-v="${esc(portal)}">Copy</button></p></div><button class="btn sm pri" data-act="invite" data-client="${id}">+ Add person</button></div>
-  ${inv.length ? `<div class="tw"><table class="stack"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Site</th><th>Job title</th><th>Status</th><th></th></tr></thead><tbody>${inv.map((i) => `<tr><td data-l="Name">${esc(i.full_name || '—')}</td><td data-l="Email">${esc(i.email)}</td><td data-l="Role">${sel(`portal_invites|${i.id}|role`, i.role, [['client_admin', 'Company administrator'], ['staff', 'Staff']], '')}</td><td data-l="Site">${sel(`portal_invites|${i.id}|site_id`, i.site_id || '', [['', 'All sites']].concat(sites.map((s) => [s.id, s.name])), '')}</td><td data-l="Job title">${esc(i.job_title || '—')}</td><td data-l="Status">${joined(i.email) ? '<span class="tag ok">Joined</span>' : '<span class="tag">Invited</span>'}</td><td><button class="btn sm ghost" data-act="delInvite" data-id="${i.id}" aria-label="Remove access">Remove</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nobody yet. Add a company administrator first; they can add their own staff.</p>'}</div>
+  <div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Belongs to</th><th>Address</th><th>Site contact</th><th>Phone</th><th>Assessments</th><th>Food hygiene</th><th></th><th></th></tr></thead><tbody>${sites.map((s) => `<tr><td data-l="Site"><input id="s-${s.id}-n" data-b="sites|${s.id}|name" value="${esc(s.name)}" aria-label="Site name">${s.is_head_office ? '<span class="muted">Head office</span>' : ''}</td><td data-l="Belongs to">${units(id).length ? sel(`sites|${s.id}|unit_id`, s.unit_id || '', unitOpts(id), '') : '<span class="muted">—</span>'}</td><td data-l="Address"><input id="s-${s.id}-a" data-b="sites|${s.id}|address" value="${esc(s.address)}" aria-label="Address"></td><td data-l="Site contact"><input id="s-${s.id}-c" data-b="sites|${s.id}|site_contact" value="${esc(s.site_contact)}" aria-label="Site contact"></td><td data-l="Phone"><input id="s-${s.id}-p" data-b="sites|${s.id}|phone" value="${esc(s.phone)}" aria-label="Phone"></td><td data-l="Assessments">${ras.filter((a) => a.site_id === s.id).length}</td><td data-l="Food hygiene">${fhrsChip(s)}</td><td><a class="btn sm" href="#/compliance/${s.id}">Site profile</a></td><td>${s.is_head_office || CO() ? '' : `<button class="btn sm ghost" data-act="delSite" data-id="${s.id}" aria-label="Remove site">✕</button>`}</td></tr>`).join('')}</tbody></table></div></div>
+  <div class="panel"><div class="sect"><div><h3>${CO() ? 'Company administrators and staff' : 'Company administrators and staff'}</h3><p class="hint">Company administrators run the whole company. Regional and area managers see the shops under their brand, region or area: they close actions, upload certificates, record sign-offs and add staff. Staff see their site and sign. Portal address: <b>${esc(portal)}</b> <button class="btn sm" data-act="copy" data-v="${esc(portal)}">Copy</button></p></div><button class="btn sm pri" data-act="invite" data-client="${id}">+ Add person</button></div>
+  ${inv.length ? `<div class="tw"><table class="stack"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Looks after</th><th>Job title</th><th>Status</th><th></th></tr></thead><tbody>${inv.map((i) => `<tr><td data-l="Name">${esc(i.full_name || '—')}</td><td data-l="Email">${esc(i.email)}</td><td data-l="Role">${sel(`portal_invites|${i.id}|role`, i.role, [['client_admin', 'Company administrator'], ['manager', 'Regional / area manager'], ['staff', 'Staff']], '')}</td><td data-l="Looks after">${i.role === 'manager' ? sel(`portal_invites|${i.id}|unit_id`, i.unit_id || '', unitOpts(id, '— choose —').slice(1), '') : i.role === 'client_admin' ? '<span class="muted">Whole company</span>' : sel(`portal_invites|${i.id}|site_id`, i.site_id || '', [['', 'All sites']].concat(sites.map((s) => [s.id, s.name])), '')}</td><td data-l="Job title">${esc(i.job_title || '—')}</td><td data-l="Status">${joined(i.email) ? '<span class="tag ok">Joined</span>' : '<span class="tag">Invited</span>'}</td><td><button class="btn sm ghost" data-act="delInvite" data-id="${i.id}" aria-label="Remove access">Remove</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nobody yet. Add a company administrator first; they can add their own staff.</p>'}</div>
   <div class="panel"><div class="sect"><h3>Risk assessments</h3></div>${ras.length ? raTable(ras) : '<p class="muted">None yet.</p>'}</div></div>`;
 }
 function inviteModal(clientId, role = 'staff') {
   const sites = clientSites(clientId);
   openModal(`<h3>Add a person — ${esc(cName(clientId))}</h3><div class="g2"><label>Full name<input id="iv-n"></label><label>Email<input id="iv-e" type="email"></label><label>Job title<input id="iv-j"></label>
-  <label>Role<select id="iv-r"><option value="client_admin"${role === 'client_admin' ? ' selected' : ''}>Company administrator — builds and publishes this company's risk assessments</option><option value="staff"${role === 'staff' ? ' selected' : ''}>Staff — reads and signs</option></select></label>
-  <label class="full">Site<select id="iv-s"><option value="">All sites</option>${sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label></div>
+  <label>Role<select id="iv-r"><option value="client_admin"${role === 'client_admin' ? ' selected' : ''}>Company administrator — runs the whole company</option><option value="manager">Regional / area manager — the shops under them</option><option value="staff"${role === 'staff' ? ' selected' : ''}>Staff — reads and signs</option></select></label>
+  <label class="full" id="iv-sl">Site<select id="iv-s"><option value="">All sites</option>${sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>
+  <label class="full" id="iv-ul" style="display:none">Looks after<select id="iv-u">${unitOpts(clientId).slice(1).map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('')}</select>${units(clientId).length ? '' : '<span class="hint">Add a brand, region or area on the company page first.</span>'}</label></div>
   <p class="hint">They sign in at the portal address with this email and get a one-time sign-in link. No password needed.</p>
   <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="inviteSave" data-client="${clientId}">Add user</button></div>`);
+  const sync = () => { const m = $('#iv-r').value; $('#iv-ul').style.display = m === 'manager' ? '' : 'none'; $('#iv-sl').style.display = m === 'staff' ? '' : 'none'; };
+  $('#iv-r').onchange = sync; sync();
 }
 
 // ---------- assessments ----------
@@ -177,7 +221,7 @@ function raTable(list) {
   const allOn = list.length && list.every((a) => S.sel.has(a.id));
   return `${S.sel.size ? `<div class="bulk"><b>${S.sel.size} selected</b><button class="btn sm pri" data-act="copyMany">Copy to other sites</button><button class="btn sm ghost" data-act="selClear">Clear</button></div>` : ''}<div class="tw"><table class="stack"><thead><tr><th class="ck"><input type="checkbox" data-act="selAll" data-ids="${list.map((a) => a.id).join(',')}"${allOn ? ' checked' : ''} aria-label="Select all"></th><th>Name</th><th>Client · site</th><th>Published</th><th>Status</th><th>Risk rating</th><th>Renewal date</th><th>Sign-offs</th></tr></thead><tbody>${list.map((a) => {
     const n = raAcks(a.id).filter((k) => k.version === a.published_version).length, aud = a.published_version ? audienceFor(a).length : 0;
-    return `<tr class="click${S.sel.has(a.id) ? ' on' : ''}" data-go="ra/${a.id}/details"><td class="ck"><input type="checkbox" data-act="selRA" data-id="${a.id}"${S.sel.has(a.id) ? ' checked' : ''} aria-label="Select"></td><td data-l="Name"><a href="#/ra/${a.id}/details"><b>${esc(a.title || 'Untitled')}</b></a><br><span class="muted">${esc(a.ref)}</span></td><td data-l="Client · site">${esc(cName(a.client_id))}<br><span class="muted">${esc(sName(a.site_id))}</span></td><td data-l="Published">${pubTag(a)}</td><td data-l="Status">${statusTag(a.status)}</td><td data-l="Risk rating">${ratingLine(a)}</td><td data-l="Renewal date" class="${a.review_date && a.review_date < today() ? 'od-t' : ''}">${fd(a.review_date)}</td><td data-l="Sign-offs">${a.published_version ? `${n}${aud ? ' of ' + aud : ''} on v${a.published_version}` : '—'}</td></tr>`;
+    return `<tr class="click${S.sel.has(a.id) ? ' on' : ''}" data-go="ra/${a.id}/details"><td class="ck"><input type="checkbox" data-act="selRA" data-id="${a.id}"${S.sel.has(a.id) ? ' checked' : ''} aria-label="Select"></td><td data-l="Name"><a href="#/ra/${a.id}/details"><b>${esc(a.title || 'Untitled')}</b></a><br><span class="muted">${esc(a.ref)}</span></td><td data-l="Client · site">${esc(cName(a.client_id))}<br><span class="muted">${esc(raWhere(a))}</span></td><td data-l="Published">${a.is_master ? `<span class="tag k-brand">Brand master</span><br><span class="muted">${copiesOf(a.id).length} site copies</span>` : pubTag(a)}${a.master_id ? '<br><span class="muted">From brand master</span>' : ''}</td><td data-l="Status">${statusTag(a.status)}</td><td data-l="Risk rating">${ratingLine(a)}</td><td data-l="Renewal date" class="${a.review_date && a.review_date < today() ? 'od-t' : ''}">${fd(a.review_date)}</td><td data-l="Sign-offs">${a.published_version ? `${n}${aud ? ' of ' + aud : ''} on v${a.published_version}` : '—'}</td></tr>`;
   }).join('')}</tbody></table></div>`;
 }
 function vRAs() {
@@ -200,18 +244,23 @@ function newRAModal(clientId, topicId) {
   const cid = clientId || rows('clients')[0].id;
   openModal(`<h3>Create risk assessment</h3><div class="g2"><label class="full">Name<input id="nr-t" placeholder="e.g. In house maintenance"></label>
   <label>Client<select id="nr-c">${rows('clients').map((c) => `<option value="${c.id}"${c.id === cid ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
-  <label>Site<select id="nr-s">${clientSites(cid).map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>
+  <label>Site<select id="nr-s">${siteOrBrandOpts(cid)}</select></label>
   <label class="full">Start from<select id="nr-from"><option value="">A blank assessment</option>${topicOptions(topicId)}<optgroup label="Copy an existing assessment">${[...rows('assessments')].sort((a, b) => (a.title || '').localeCompare(b.title || '')).map((a) => `<option value="a:${a.id}">${esc(a.title || 'Untitled')} (${esc(cName(a.client_id))} · ${esc(sName(a.site_id))})</option>`).join('')}</optgroup></select></label></div>
   <p class="hint">A topic brings in its description, people exposed, hazards, controls and ratings for you to adjust. Copying an assessment does the same, without actions, audits or sign-offs.</p>
   <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="newRASave">Create</button></div>`);
   $('#nr-from').onchange = (e) => { const v = e.target.value; if (!$('#nr-t').value.trim() && v.startsWith('t:')) $('#nr-t').value = byId('topic_library', v.slice(2))?.title || ''; };
   if (topicId) $('#nr-t').value = byId('topic_library', topicId)?.title || '';
-  $('#nr-c').onchange = (e) => { $('#nr-s').innerHTML = clientSites(e.target.value).map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join(''); };
+  $('#nr-c').onchange = (e) => { $('#nr-s').innerHTML = siteOrBrandOpts(e.target.value); };
+}
+function siteOrBrandOpts(cid) {
+  const brands = units(cid).filter((u) => u.kind === 'brand');
+  return `<optgroup label="Sites">${clientSites(cid).map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</optgroup>${brands.length ? `<optgroup label="Brand master — copied to the brand's sites">${brands.map((b) => `<option value="m:${b.id}">★ ${esc(b.name)} — brand master</option>`).join('')}</optgroup>` : ''}`;
 }
 async function newRASave() {
   const fv = $('#nr-from').value, from = fv.startsWith('a:') ? byId('assessments', fv.slice(2)) : fv.startsWith('t:') ? byId('topic_library', fv.slice(2)) : null, isTopic = fv.startsWith('t:');
-  const site = byId('sites', $('#nr-s').value); if (!site) return toast('Choose a site', true);
-  const a = { id: uid(), ref: newRef(), title: $('#nr-t').value.trim() || from?.title || '', client_id: site.client_id, site_id: site.id, status: 'Draft', assessor: S.me.full_name || '', assessment_date: today(), review_date: addDays(today(), 365),
+  const sv = $('#nr-s').value, brand = sv.startsWith('m:') ? byId('org_units', sv.slice(2)) : null, site = brand ? null : byId('sites', sv);
+  if (!site && !brand) return toast('Choose a site', true);
+  const a = { id: uid(), ref: newRef(), title: $('#nr-t').value.trim() || from?.title || '', client_id: (site || brand).client_id, site_id: site ? site.id : null, is_master: !!brand, unit_id: brand ? brand.id : null, status: 'Draft', assessor: S.me.full_name || '', assessment_date: today(), review_date: addDays(today(), 365),
     topic_id: isTopic ? from.id : from?.topic_id || null, description: from?.description || null, people_exposed: from ? [...from.people_exposed] : ['Colleagues'], init_l: from?.init_l || 0, init_s: from?.init_s || 0, res_l: from?.res_l || 0, res_s: from?.res_s || 0, published_version: 0, updated_at: nowIso() };
   closeModal();
   try {
@@ -236,17 +285,20 @@ async function newRASave() {
 
 function vRA(id, tab) {
   const a = byId('assessments', id); if (!a) return `<div class="page">${empty('Risk assessment not found', '')}</div>`;
-  const tabs = [['details', 'Details'], ['hazards', 'Hazards and controls', raHz(id).length], ['rating', 'Overall rating'], ['actions', 'Actions', raActs(id).filter((x) => x.status !== 'Done').length], ['audits', 'Audits', rows('audits').filter((u) => u.assessment_id === id).length], ['summary', 'Summary and approval'], ['publish', 'Publish and sign-offs', raAcks(id).length], ['history', 'History']];
+  const tabs = a.is_master
+    ? [['details', 'Details'], ['hazards', 'Hazards and controls', raHz(id).length], ['rating', 'Overall rating'], ['summary', 'Summary and approval'], ['brandsites', 'Brand sites', copiesOf(id).length], ['history', 'History']]
+    : [['details', 'Details'], ['hazards', 'Hazards and controls', raHz(id).length], ['rating', 'Overall rating'], ['actions', 'Actions', raActs(id).filter((x) => x.status !== 'Done').length], ['audits', 'Audits', rows('audits').filter((u) => u.assessment_id === id).length], ['summary', 'Summary and approval'], ['publish', 'Publish and sign-offs', raAcks(id).length], ['history', 'History']];
   if (tab === 'controls') tab = 'hazards';
-  const fn = { details: tDetails, hazards: tHazards, controls: tHazards, rating: tRating, summary: tSummary, actions: tActions, audits: tAudits, publish: tPublish, history: tHistory }[tab] || tDetails;
+  if (a.is_master && ['actions', 'audits', 'publish'].includes(tab)) tab = 'brandsites';
+  const fn = { details: tDetails, hazards: tHazards, controls: tHazards, rating: tRating, summary: tSummary, actions: tActions, audits: tAudits, publish: tPublish, history: tHistory, brandsites: tBrandSites }[tab] || tDetails;
   return `<div class="head"><div class="row"><a class="btn sm ghost" href="#/ras">← Risk assessments</a><div class="row sp"><button class="btn sm" data-act="pdf" data-id="${id}">Export PDF</button><button class="btn sm" data-act="dupRA" data-id="${id}">Copy to other sites</button><button class="btn sm dng" data-act="delRA" data-id="${id}">Delete</button></div></div>
-  <h2>${esc(a.title || 'Untitled risk assessment')}</h2><div class="meta"><b style="color:var(--ink)">${esc(a.ref)}</b><span>${esc(cName(a.client_id))} · ${esc(sName(a.site_id))}</span>${statusTag(a.status)}${pubTag(a)}${(() => { const k = ctlScore(raCtl(a.id)); return `<span>Score <b style="color:var(--ink)">${pct(k)}</b></span><span>Flagged <b style="color:${k.f ? 'var(--vh)' : 'var(--ink)'}">${k.f}</b></span><span>Actions <b style="color:var(--ink)">${raActs(a.id).filter((x) => x.status !== 'Done').length}</b></span>`; })()}${a.approved_at ? '<span class="tag ok">Complete</span>' : '<span class="tag warn">Incomplete</span>'}<span>Renewal <b class="${a.review_date && a.review_date < today() ? 'od-t' : ''}">${fd(a.review_date)}</b></span></div>
+  <h2>${esc(a.title || 'Untitled risk assessment')}</h2><div class="meta"><b style="color:var(--ink)">${esc(a.ref)}</b><span>${esc(cName(a.client_id))} · ${esc(raWhere(a))}</span>${a.is_master ? '<span class="tag k-brand">Brand master</span>' : statusTag(a.status) + pubTag(a)}${a.master_id && byId('assessments', a.master_id) ? `<a class="tag" href="#/ra/${a.master_id}/brandsites">From brand master</a>` : ''}${(() => { const k = ctlScore(raCtl(a.id)); return `<span>Score <b style="color:var(--ink)">${pct(k)}</b></span><span>Flagged <b style="color:${k.f ? 'var(--vh)' : 'var(--ink)'}">${k.f}</b></span><span>Actions <b style="color:var(--ink)">${raActs(a.id).filter((x) => x.status !== 'Done').length}</b></span>`; })()}${a.approved_at ? '<span class="tag ok">Complete</span>' : '<span class="tag warn">Incomplete</span>'}<span>Renewal <b class="${a.review_date && a.review_date < today() ? 'od-t' : ''}">${fd(a.review_date)}</b></span></div>
   <nav class="tabs">${tabs.map(([k, l, n]) => `<a href="#/ra/${id}/${k}" class="${tab === k ? 'on' : ''}">${l}${n != null ? `<span class="n">${n}</span>` : ''}</a>`).join('')}</nav></div><div class="page">${fn(a)}</div>`;
 }
 function tDetails(a) {
   const id = a.id, ppl = a.people_exposed || [], extra = ppl.filter((p) => !PEOPLE.includes(p));
   return `<div class="panel"><div class="g2">${field(`assessments|${id}|title`, a.title, 'Name of the risk assessment', 'text', ' class="full"')}
-  ${sel(`assessments|${id}|client_id`, a.client_id, rows('clients').map((c) => [c.id, c.name]), 'Client')}${sel(`assessments|${id}|site_id`, a.site_id, clientSites(a.client_id).map((s) => [s.id, s.name]), 'Site')}
+  ${a.is_master ? `<label>Client<input value="${esc(cName(a.client_id))}" disabled></label><label>Brand<input value="${esc(byId('org_units', a.unit_id)?.name || '')}" disabled></label>` : sel(`assessments|${id}|client_id`, a.client_id, rows('clients').map((c) => [c.id, c.name]), 'Client') + sel(`assessments|${id}|site_id`, a.site_id, clientSites(a.client_id).map((s) => [s.id, s.name]), 'Site')}
   ${area(`assessments|${id}|description`, a.description, 'Description — what this assessment covers', ' class="full"')}
   <div class="full"><label>People exposed</label><div class="row" style="margin-top:6px">${PEOPLE.concat(extra).map((p) => `<label class="chk" style="border:1px solid var(--line);border-radius:20px;padding:6px 12px;background:${ppl.includes(p) ? 'var(--soft)' : '#fff'}"><input type="checkbox" data-act="ppl" data-v="${esc(p)}"${ppl.includes(p) ? ' checked' : ''}> ${esc(p)}</label>`).join('')}
   <input id="ppl-new" placeholder="Add other…" style="width:180px"><button class="btn sm" data-act="pplAdd">Add</button></div></div>
@@ -529,28 +581,81 @@ function vTeam() {
   <p class="hint">${SUPER() ? 'New administrators sign in at ' + esc(location.origin + location.pathname) + ' with their email. People from a client company should be added on that client\'s page as a <b>Company administrator</b> instead, so they only see their own company.' : 'Only a superadmin can add or remove administrators.'}</p></div>`;
 }
 
+// ---------- brand masters ----------
+const brandSitesWithout = (m) => { const have = new Set(copiesOf(m.id).map((x) => x.site_id)); return unitSites(m.unit_id).filter((st) => !have.has(st.id)).map((st) => st.id); };
+function tBrandSites(a) {
+  const cs = copiesOf(a.id).sort((x, y) => sName(x.site_id).localeCompare(sName(y.site_id))), missing = brandSitesWithout(a);
+  return `<div class="sect"><div><h2>Brand sites</h2><p class="hint">This master is the brand's standard. Each site has its own copy, where the site sets its own answers and can add local hazards or controls.</p></div>
+  <div class="row"><button class="btn" data-act="dupRA" data-id="${a.id}">Copy to brand sites${missing.length ? ` (${missing.length} without a copy)` : ''}</button>${cs.length ? `<button class="btn pri" data-act="syncAll">Update all ${cs.length} site cop${cs.length === 1 ? 'y' : 'ies'}</button>` : ''}</div></div>
+  ${cs.length ? `<div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Copy</th><th>Status</th><th>Published</th><th>Last updated from master</th></tr></thead><tbody>${cs.map((x) => `<tr class="click" data-go="ra/${x.id}/details"><td data-l="Site"><b>${esc(sName(x.site_id))}</b></td><td data-l="Copy">${esc(x.ref)}</td><td data-l="Status">${statusTag(x.status)}</td><td data-l="Published">${pubTag(x)}</td><td data-l="Last updated">${x.master_synced_at ? ft(x.master_synced_at) : '—'}</td></tr>`).join('')}</tbody></table></div>`
+    : empty('No site copies yet', unitSites(a.unit_id).length ? 'Copy this master to the brand\'s sites to get started.' : 'Put sites under this brand on the company page, then copy the master to them.', '')}
+  ${missing.length && cs.length ? `<p class="hint">${missing.length} brand site${missing.length > 1 ? 's don\'t' : ' doesn\'t'} have a copy yet: ${missing.map((sid) => esc(sName(sid))).join(', ')}.</p>` : ''}`;
+}
+function syncModal(m) {
+  const cs = copiesOf(m.id), pub = cs.filter((x) => x.published_version > 0).length;
+  openModal(`<h3>Update ${cs.length} site cop${cs.length === 1 ? 'y' : 'ies'} from the master</h3>
+  <p>Each copy gets the master's current wording: title, description, people exposed, overall rating, hazards and controls.</p>
+  <ul class="ctlist"><li>Each site <b>keeps its own answers</b> (Yes / No / N/A, hazard risk scores and people affected) for hazards and controls it already has.</li><li>Hazards or controls the site <b>added itself are kept</b>.</li><li>Anything removed from the master is removed from the copies.</li></ul>
+  ${pub ? `<label class="chk" style="margin-top:12px"><input type="checkbox" id="sy-pub" checked> Publish a new version at the ${pub} site${pub > 1 ? 's' : ''} already published, so staff are asked to read and sign it again</label>` : ''}
+  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="syncGo">Update copies</button></div>`);
+}
+async function syncCopy(m, c) {
+  const jobs = [], mh = raHz(m.id), ch = raHz(c.id), hmap = {}, mhIds = new Set(mh.map((h) => h.id));
+  jobs.push(upd('assessments', c.id, { title: m.title, description: m.description, people_exposed: [...(m.people_exposed || [])], init_l: m.init_l, init_s: m.init_s, res_l: m.res_l, res_s: m.res_s, master_synced_at: nowIso() }));
+  for (const h of mh) {
+    const ex = ch.find((x) => x.master_item_id === h.id);
+    if (ex) { hmap[h.id] = ex.id; jobs.push(upd('assessment_hazards', ex.id, { title: h.title, category: h.category, description: h.description, sort: h.sort })); }
+    else { hmap[h.id] = uid(); jobs.push(ins('assessment_hazards', { id: hmap[h.id], assessment_id: c.id, register_id: h.register_id, title: h.title, category: h.category, description: h.description, risk_l: h.risk_l || 0, risk_s: h.risk_s || 0, people_affected: [...(h.people_affected || [])], sort: h.sort, master_item_id: h.id })); }
+  }
+  for (const x of ch) if (x.master_item_id && !mhIds.has(x.master_item_id)) { jobs.push(del('assessment_hazards', x.id)); D.assessment_controls = rows('assessment_controls').filter((k) => k.assessment_hazard_id !== x.id); }
+  const mc = raCtl(m.id), cc = raCtl(c.id), mcIds = new Set(mc.map((k) => k.id));
+  for (const k of mc) {
+    const ex = cc.find((x) => x.master_item_id === k.id), hz = k.assessment_hazard_id ? hmap[k.assessment_hazard_id] || null : null;
+    if (ex) jobs.push(upd('assessment_controls', ex.id, { title: k.title, description: k.description, type: k.type, assessment_hazard_id: hz, sort: k.sort }));
+    else jobs.push(ins('assessment_controls', { assessment_id: c.id, assessment_hazard_id: hz, register_id: k.register_id, title: k.title, description: k.description, type: k.type, state: k.state, sort: k.sort, master_item_id: k.id }));
+  }
+  for (const x of cc) if (x.master_item_id && !mcIds.has(x.master_item_id) && byId('assessment_controls', x.id)) jobs.push(del('assessment_controls', x.id));
+  await Promise.all(jobs);
+}
+async function syncGo(m, btn) {
+  const pub = !!$('#sy-pub')?.checked, cs = copiesOf(m.id); let done = 0, failed = 0, published = 0;
+  btn.disabled = true;
+  for (const c of cs) {
+    btn.textContent = `Updating ${done + failed + 1} of ${cs.length}…`;
+    try {
+      await syncCopy(m, c); done++;
+      if (pub && c.published_version > 0) { const { data, error } = await sb.rpc('publish_assessment', { aid: c.id, note: 'Updated from the brand master' }); if (!error) { c.published_version = data; published++; } }
+    } catch (e) { failed++; }
+  }
+  if (published) D.published_assessments = await fetchAll('published_assessments', 'id,assessment_id,client_id,site_id,version,note,published_at,published_by').then((r) => (S.asCo ? r.filter((x) => x.client_id === S.asCo) : r));
+  closeModal(); toast(failed ? `${done} updated, ${failed} failed` : `${done} cop${done === 1 ? 'y' : 'ies'} updated${published ? `, ${published} published` : ''}`, !!failed); window.__render();
+}
+
 // ---------- copy assessments to other sites ----------
 async function copyRA(src, site) {
-  const a = { id: uid(), ref: newRef(), title: src.title, client_id: site.client_id, site_id: site.id, status: 'Draft', assessor: S.me.full_name || '', assessment_date: today(), review_date: addDays(today(), 365),
+  const mid = src.is_master ? src.id : src.master_id || null, mItem = (x) => (src.is_master ? x.id : x.master_item_id || null);
+  const a = { id: uid(), ref: newRef(), title: src.title, client_id: site.client_id, site_id: site.id, master_id: mid, master_synced_at: mid ? nowIso() : null, status: 'Draft', assessor: S.me.full_name || '', assessment_date: today(), review_date: addDays(today(), 365),
     topic_id: src.topic_id || null, description: src.description || null, activity: src.activity || null, people_exposed: [...(src.people_exposed || [])], init_l: src.init_l || 0, init_s: src.init_s || 0, res_l: src.res_l || 0, res_s: src.res_s || 0, published_version: 0, updated_at: nowIso() };
   await ins('assessments', a);
   const hmap = {}, jobs = [];
-  for (const h of raHz(src.id)) { hmap[h.id] = uid(); jobs.push(ins('assessment_hazards', { id: hmap[h.id], assessment_id: a.id, register_id: h.register_id, title: h.title, category: h.category, description: h.description, risk_l: h.risk_l || 0, risk_s: h.risk_s || 0, people_affected: [...(h.people_affected || [])], sort: h.sort })); }
-  for (const c of raCtl(src.id)) jobs.push(ins('assessment_controls', { assessment_id: a.id, assessment_hazard_id: hmap[c.assessment_hazard_id] || null, register_id: c.register_id, title: c.title, description: c.description, type: c.type, state: c.state, sort: c.sort }));
+  for (const h of raHz(src.id)) { hmap[h.id] = uid(); jobs.push(ins('assessment_hazards', { id: hmap[h.id], assessment_id: a.id, register_id: h.register_id, title: h.title, category: h.category, description: h.description, risk_l: h.risk_l || 0, risk_s: h.risk_s || 0, people_affected: [...(h.people_affected || [])], sort: h.sort, master_item_id: mItem(h) })); }
+  for (const c of raCtl(src.id)) jobs.push(ins('assessment_controls', { assessment_id: a.id, assessment_hazard_id: hmap[c.assessment_hazard_id] || null, register_id: c.register_id, title: c.title, description: c.description, type: c.type, state: c.state, sort: c.sort, master_item_id: mItem(c) }));
   await Promise.all(jobs);
   return a;
 }
-function copyModal(ids) {
+function copyModal(ids, pre = []) {
   const src = ids.map((id) => byId('assessments', id)).filter(Boolean); if (!src.length) return;
+  const preset = new Set(pre);
   const from = new Set(src.map((a) => a.site_id));
   const groups = [...rows('clients')].sort((a, b) => a.name.localeCompare(b.name)).map((c) => [c, clientSites(c.id)]).filter(([, ss]) => ss.length);
   openModal(`<h3>Copy ${src.length === 1 ? '“' + esc(src[0].title || 'Untitled') + '”' : src.length + ' risk assessments'} to other sites</h3>
   ${src.length > 1 ? `<p class="muted" style="margin-top:-6px">${src.map((a) => esc(a.title || 'Untitled')).join(' · ')}</p>` : ''}
   <p class="hint" style="margin-top:0">Each site gets its own Draft copy with the hazards, controls, risk scores and people affected. Actions, audits, approval and sign-offs are not copied.</p>
   <input id="cp-q" type="search" placeholder="Search sites…" style="margin:8px 0">
-  <div class="pick" id="cp-list">${groups.map(([c, ss]) => `${CO() ? '' : `<div class="cat">${esc(c.name)}</div>`}${ss.map((st) => `<label class="opt" data-txt="${esc((c.name + ' ' + st.name + ' ' + (st.address || '')).toLowerCase())}"><input type="checkbox" value="${st.id}"><span><b>${esc(st.name)}</b>${from.has(st.id) ? ' <span class="muted">(copying from here)</span>' : ''}<br><span class="muted">${esc(st.address || '')}</span></span></label>`).join('')}`).join('')}</div>
+  <div class="pick" id="cp-list">${groups.map(([c, ss]) => `${CO() ? '' : `<div class="cat">${esc(c.name)}</div>`}${ss.map((st) => `<label class="opt" data-txt="${esc((c.name + ' ' + st.name + ' ' + (st.address || '')).toLowerCase())}"><input type="checkbox" value="${st.id}"${preset.has(st.id) ? ' checked' : ''}><span><b>${esc(st.name)}</b>${from.has(st.id) ? ' <span class="muted">(copying from here)</span>' : ''}${src.length === 1 && copiesOf(src[0].id).some((x) => x.site_id === st.id) ? ' <span class="tag ok">has a copy</span>' : ''}<br><span class="muted">${esc(st.address || '')}</span></span></label>`).join('')}`).join('')}</div>
   <div class="ft"><span class="muted" id="cp-n" style="margin-right:auto">No sites chosen</span><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="copySave" data-ids="${ids.join(',')}">Make copies</button></div>`, true);
   $('#cp-q').oninput = (e) => { const q = e.target.value.toLowerCase(); document.querySelectorAll('#cp-list .opt').forEach((o) => (o.style.display = o.dataset.txt.includes(q) ? '' : 'none')); };
+  if (preset.size) setTimeout(() => $('#cp-list').onchange(), 0);
   $('#cp-list').onchange = () => { const n = document.querySelectorAll('#cp-list input:checked').length, t = n * src.length; $('#cp-n').textContent = n ? `${n} site${n > 1 ? 's' : ''} · ${t} cop${t > 1 ? 'ies' : 'y'} will be made` : 'No sites chosen'; };
 }
 async function copySave(ids, btn) {
@@ -582,7 +687,9 @@ export async function adminClick(e, b) {
     case 'invite': return inviteModal(d.client || a?.client_id);
     case 'inviteSave': {
       const email = $('#iv-e').value.trim().toLowerCase(); if (!/^\S+@\S+\.\S+$/.test(email)) return toast('Enter a valid email', true);
-      const row = { email, role: $('#iv-r').value, client_id: d.client, site_id: $('#iv-s').value || null, full_name: $('#iv-n').value.trim() || null, job_title: $('#iv-j').value.trim() || null };
+      const role = $('#iv-r').value, unit = $('#iv-u')?.value || null;
+      if (role === 'manager' && !unit) return toast('Choose the brand, region or area they look after', true);
+      const row = { email, role, client_id: d.client, site_id: role === 'staff' ? $('#iv-s').value || null : null, unit_id: role === 'manager' ? unit : null, full_name: $('#iv-n').value.trim() || null, job_title: $('#iv-j').value.trim() || null };
       closeModal(); await ins('portal_invites', row).catch(() => {}); await refreshProfiles(); toast('Added — they sign in at the portal address with their email'); return window.__render();
     }
     case 'delInvite': if (await confirmBox('Remove this person\'s portal access? Their past sign-offs are kept.', 'Remove access')) { await del('portal_invites', d.id).catch(() => {}); await refreshProfiles(); window.__render(); } return;
@@ -591,7 +698,15 @@ export async function adminClick(e, b) {
     case 'tSave': return topicSave(d.id);
     case 'tDel': if (await confirmBox('Delete this topic from the library? Assessments made from it are not affected.')) { closeModal(); await del('topic_library', d.id).catch(() => {}); window.__render(); } return;
     case 'newRASave': return newRASave();
-    case 'dupRA': return copyModal([a.id]);
+    case 'dupRA': return a.is_master ? copyModal([a.id], brandSitesWithout(a)) : copyModal([a.id]);
+    case 'syncAll': return syncModal(a);
+    case 'syncGo': return syncGo(a, b);
+    case 'openAs': S.asCo = d.id; viewAs(d.id); location.hash = '#/'; return window.__render();
+    case 'exitAs': { const back = S.asCo; S.asCo = null; $('#root').innerHTML = '<div class="boot"><p>Returning to Safetybiz view…</p></div>'; await loadAdmin(S.me); location.hash = '#/client/' + back; return window.__render(); }
+    case 'unitAdd': { const k = d.k, row = { client_id: d.c, parent_id: d.p || null, kind: k, name: 'New ' + KIND[k].toLowerCase(), sort: units(d.c).length };
+      await ins('org_units', row).catch(() => {}); window.__render(); return $(`#u-${row.id}-n`)?.select(); }
+    case 'unitDel': { const n = unitSites(d.id).length; if (await confirmBox(`Remove this ${KIND[byId('org_units', d.id).kind].toLowerCase()} and everything under it?${n ? ` Its ${n} site${n > 1 ? 's' : ''} will become ungrouped.` : ''} Managers linked to it lose access.`, 'Remove')) {
+      const ids = unitDesc(d.id); await del('org_units', d.id).catch(() => {}); D.org_units = rows('org_units').filter((u) => !ids.has(u.id)); rows('sites').forEach((st) => { if (ids.has(st.unit_id)) st.unit_id = null; }); window.__render(); } return; }
     case 'selRA': b.checked ? S.sel.add(d.id) : S.sel.delete(d.id); return window.__render();
     case 'selAll': { const ids = d.ids ? d.ids.split(',') : []; ids.forEach((id) => (b.checked ? S.sel.add(id) : S.sel.delete(id))); return window.__render(); }
     case 'selClear': S.sel.clear(); return window.__render();
@@ -685,7 +800,7 @@ async function refreshProfiles() { D.profiles = await fetchAll('profiles'); }
 async function exportRA(a) {
   const { data: sg } = await sb.from('acknowledgements').select('id,signature').eq('assessment_id', a.id);
   const sigs = Object.fromEntries((sg || []).map((r) => [r.id, r.signature]));
-  assessmentPDF({ ...a, client: cName(a.client_id), site: sName(a.site_id), siteAddress: byId('sites', a.site_id)?.address, people: a.people_exposed || [], hazards: raHz(a.id).map((h) => ({ ...h, controls: hzCtl(a.id, h.id), actions: raActs(a.id).filter((x) => x.assessment_hazard_id === h.id) })), controls: raCtl(a.id).filter((c) => !c.assessment_hazard_id || !raHz(a.id).some((h) => h.id === c.assessment_hazard_id)),
+  assessmentPDF({ ...a, client: cName(a.client_id), site: raWhere(a), siteAddress: byId('sites', a.site_id)?.address, people: a.people_exposed || [], hazards: raHz(a.id).map((h) => ({ ...h, controls: hzCtl(a.id, h.id), actions: raActs(a.id).filter((x) => x.assessment_hazard_id === h.id) })), controls: raCtl(a.id).filter((c) => !c.assessment_hazard_id || !raHz(a.id).some((h) => h.id === c.assessment_hazard_id)),
     versionLabel: a.published_version ? `Working copy · last published as version ${a.published_version}` : 'Working copy · not yet published',
     actions: raActs(a.id), audits: rows('audits').filter((u) => u.assessment_id === a.id), acks: raAcks(a.id).map((k) => ({ ...k, signature: sigs[k.id] })) });
 }
@@ -702,6 +817,11 @@ export function adminField(el, isChange) {
   if (t === 'actions' && f === 'status') patch.completed_on = v === 'Done' ? today() : null;
   if (t === 'assessments' && f === 'client_id') { const s = clientSites(v)[0]; patch.site_id = s?.id; }
   if (t === 'assessments') patch.updated_at = nowIso();
+  if (t === 'portal_invites' && f === 'role') {
+    const inv = byId('portal_invites', id);
+    if (v === 'manager') { const u = units(inv.client_id)[0]; if (!u) { toast('Add a brand, region or area on the company page first', true); window.__render(); return false; } Object.assign(patch, { unit_id: inv.unit_id || u.id, site_id: null }); }
+    else patch.unit_id = null;
+  }
   if (t === 'portal_invites') { upd(t, id, patch).then(refreshProfiles).then(() => window.__render()).catch(() => {}); return false; }
   const sendPatch = { ...patch }; delete sendPatch.updated_at;
   const r = byId(t, id); if (r && t === 'assessments') r.updated_at = patch.updated_at;
