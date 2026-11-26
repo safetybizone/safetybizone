@@ -209,3 +209,21 @@ th.ck,td.ck{width:40px;padding-right:0}
 tr.on td{background:#fff7f3}
 .bulk{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--teal);color:#fff;border-radius:10px;padding:8px 12px;margin-bottom:10px;position:sticky;top:72px;z-index:4}
 .bulk .btn.ghost{color:#fff}
+
+/* food hygiene rating */
+.fhg{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,1.1fr);gap:20px;align-items:start}
+.fhb{width:92px;height:92px;border-radius:16px;display:grid;place-items:center;align-content:center;background:var(--soft);color:var(--ink);text-align:center}
+.fhb span{font-size:36px;font-weight:800;line-height:1}.fhb small{font-size:10.5px;font-weight:600;letter-spacing:.04em;margin-top:4px;text-transform:uppercase}
+.fhb.ok{background:#e3f5f0;color:#1f7d6d}.fhb.warn{background:#fff3ec;color:#b8420e}.fhb.bad{background:#fdeeea;color:var(--vh)}
+table.mini td{padding:5px 8px;font-size:13.5px;border-bottom:1px solid var(--line)}table.mini tr:last-child td{border-bottom:0}
+@media(max-width:860px){.fhg{grid-template-columns:auto minmax(0,1fr)}.fhg>div:last-child{grid-column:1/-1}}
+
+/* company structure, brand masters, view-as */
+.tree{display:grid;gap:6px}
+.tn{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:#fafcfb}
+.tn input{max-width:260px;min-height:34px;padding:4px 8px}
+.tag.k-brand{background:#fff3ec;border-color:#ffd2b8;color:#b8420e}.tag.k-region{background:var(--soft);border-color:var(--mint);color:#1f7d6d}.tag.k-area{background:#eef1f5;border-color:#d6dde6;color:#3d4f63}
+.asbar{display:flex;gap:10px;align-items:center;background:#fff3ec;border:1px solid #ffd2b8;color:#8a3410;border-radius:8px;padding:4px 6px 4px 12px;font-size:13.5px}
+.todo{display:flex;gap:14px;align-items:center;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--or);border-radius:10px;padding:12px 14px;text-decoration:none;color:inherit;margin-bottom:8px}
+.todo:hover{border-color:var(--or)}.todo.done{border-left-color:var(--mint)}
+.todo .n{flex:none;width:34px;height:34px;border-radius:50%;background:#fff3ec;color:var(--or);display:grid;place-items:center;font-weight:700}
