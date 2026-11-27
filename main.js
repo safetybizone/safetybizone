@@ -76,6 +76,29 @@ async function savePassword(btn) {
   if (error) return toast(/different from the old|same/i.test(error.message) ? 'Choose a password you have not used before' : error.message, true);
   pwUser = data.user; closeModal(); toast('Password saved'); render();
 }
+// Email links (invitation, sign-in link, password reset) open this page first. The one-time token is used only when
+// the person presses Continue: corporate email scanners open links to check them, which would otherwise use the link up.
+// The Supabase email templates send: {{ .SiteURL }}/?token_hash={{ .TokenHash }}&type=invite|magiclink|recovery
+const LINK_TYPES = { invite: 'invite', magiclink: 'email', email: 'email', recovery: 'recovery' };
+const linkQ = new URLSearchParams(location.search);
+let pendingLink = linkQ.get('token_hash') && LINK_TYPES[linkQ.get('type')] ? { token_hash: linkQ.get('token_hash'), type: linkQ.get('type') } : null;
+let linking = false;
+function linkView() {
+  const t = pendingLink.type;
+  const [h, p, b] = t === 'invite' ? [`You've been invited to ${PORTAL}`, 'Continue to open your account. You can then set a password.', 'Accept invitation']
+    : t === 'recovery' ? ['Choose a new password', 'Continue to choose a new password for your account.', 'Continue']
+    : [`Sign in to ${PORTAL}`, 'Continue to sign in. This link works once.', `Continue to ${PORTAL}`];
+  root.innerHTML = `<div class="auth"><div class="l"><img src="logo-dark-bg.png" alt="${esc(COMPANY)} — Safety made easy"><div><h1>${esc(PORTAL)}</h1></div><span style="font-size:13px;color:#7fa3a0">© ${new Date().getFullYear()} ${esc(COMPANY)}</span></div>
+  <div class="r"><div id="lk" style="display:grid;gap:14px;max-width:420px"><h2 style="font-size:24px;margin:0">${esc(h)}</h2><p class="muted" style="margin:0">${esc(p)}</p><button class="btn pri" id="lk-go">${esc(b)}</button></div></div></div>`;
+  $('#lk-go').onclick = async (e) => {
+    e.target.disabled = true; linking = true;
+    const { data, error } = await sb.auth.verifyOtp({ token_hash: pendingLink.token_hash, type: LINK_TYPES[t] });
+    pendingLink = null; history.replaceState(null, '', location.pathname); linking = false;
+    if (error || !data?.session) return loginView('That link has expired or was already used. Each link works once — enter your email for a new one and use the newest email.', t === 'recovery' ? 'forgot' : 'link');
+    me = null; await start(data.session);
+    if (me && me.role !== 'none' && (t === 'recovery' || (t === 'invite' && !(data.session.user.user_metadata || {}).has_password))) passwordModal(t === 'recovery');
+  };
+}
 let pwUser = null, pwLater = false;
 const needsPassword = () => pwUser && !(pwUser.user_metadata || {}).has_password && !pwLater && !sessionStorage.getItem('pw-later');
 function noAccessView() {
@@ -84,6 +107,7 @@ function noAccessView() {
 }
 
 async function start(session) {
+  if (pendingLink) { me = null; ready = false; return linkView(); }
   if (!session) {
     me = null; ready = false;
     const h = new URLSearchParams(location.hash.replace(/^#/, ''));
@@ -128,6 +152,7 @@ document.addEventListener('change', (e) => onField(e, true));
 window.addEventListener('hashchange', () => { closeModal(); render(); window.scrollTo(0, 0); });
 
 sb.auth.onAuthStateChange((ev, session) => {
+  if (linking) return; // handled by linkView
   if (ev === 'PASSWORD_RECOVERY') { setTimeout(async () => { if (!me || me.id !== session.user.id) await start(session); passwordModal(true); }, 0); return; }
   if (ev === 'SIGNED_IN' && me && session && me.id === session.user.id) return; // already loaded
   if (ev === 'SIGNED_IN' || ev === 'INITIAL_SESSION' || ev === 'SIGNED_OUT') setTimeout(() => start(session), 0);
