@@ -4,8 +4,9 @@ Updated 27 Nov 2026. Live: https://safetybizone.netlify.app/ · Repo: safetybizo
 
 ## Architecture
 - Tests (local):
-  - database: `test_011.sql` (63 checks), `test_012.sql` (16 checks, rolled back)
-  - browser: `e2e_r2.py` (22 checks), `e2e_certdel.py` (9), `e2e_struct.py`, `e2e_ch.py`, `e2e_perm.py`; all re-runnable
+  - database: `test_011.sql` (63 checks), `test_012.sql` (16), `test_013.sql` (26), `test_014.sql` (32); all rolled back
+  - browser: `e2e_relA.py` (36 checks: every role, passwords, invitations, mobile), `e2e_r2.py` (22), `e2e_orgdel.py` (11), `e2e_certdel.py` (9), `e2e_struct.py`, `e2e_ch.py`, `e2e_perm.py`; all re-runnable
+  - the local mock (`proxy.js`) also fakes password sign-in, password reset, email links and the `invite-user` function (it records them in `/tmp/auth_log.json`)
   - test-copy-only clean-up: `cleanup_dup_units.sql`
 - Static ES-module app, no build step, hosted on Netlify from GitHub `main`.
   - `core.js`: Supabase client, shared UI helpers, data cache `D`
@@ -21,11 +22,12 @@ Updated 27 Nov 2026. Live: https://safetybizone.netlify.app/ · Repo: safetybizo
 - Edge functions:
   - `fsa`: food hygiene ratings
   - `companies-house`: key held in the secret `CH_API_KEY`, admin only
+  - `invite-user` (Release A, live): emails an invitation (new account) or a sign-in link (existing account); the database decides who may invite whom
 - Roles:
   - superadmin
   - Safetybiz admin
   - company admin (`client_admin`)
-  - regional/area manager (`manager`)
+  - manager (`manager`): site manager (sites assigned directly) and/or brand / region / area manager
   - staff
   - Rules follow the Permission master sheet (https://claude.ai/artifact/4bUoEvqfccqAhBCVnQzBKj).
 - Local test copy:
@@ -47,8 +49,20 @@ Updated 27 Nov 2026. Live: https://safetybizone.netlify.app/ · Repo: safetybizo
 | 010 | Companies House fields on `clients` |
 | 011 | Releases 1+2 (live 27 Nov): `legal_entities`; `org_units_unique_name`; `guard_site_delete`; `assessments.brand_id` + `mgr_ra()`; site fields (`trading_name`, `legal_entity_id`, `business_activity`, `contact_email`, `status`, `archived_at`, `region_id`); **`site_brands`** (several brands per site); `site_doc_types` + `compliance_doc_types.default_applies`; head office trigger removed; org-wide masters; `guard_master`. `sites.unit_id` is no longer used by the app (it mirrors `region_id`). Data step: `data-011-head-offices.sql` |
 | 012 | Certificate delete (live 27 Nov): `admin_log`; `delete_certificate(kind, id, reason)` (superadmin only); issued certificates are deletable only through it; uploaded certificates can no longer be deleted directly by admins |
+| 013 | Release A (live 27 Nov): test organisations (`clients.is_test`, superadmin only) and `delete_organisation(id, name, reason)` (superadmin only, test organisations only, logged in `admin_log`) |
+| 014 | Release A (live 27 Nov): sites created by Safetybiz only; `site_managers` (several managers per site, several sites per manager); status `Pending setup` (sites open when a manager is assigned, return to pending when the last goes); `mgr_site`/`mgr_ra` include direct site managers; a manager's brand/region/area is optional. Existing sites without a manager become Pending setup (records untouched). Rollback: `rollback-release-a.sql` (rehearsed: restores the 7 functions exactly) |
 
 ## Completed (latest first)
+- 27 Nov: **Release A deployed live** (approved 27 Nov; one production push). Built and tested locally first:
+  - Sites: only Safetybiz administrators create them (database and screens). Every open site needs a site manager with an account; new and unmanaged sites are **Pending setup** and stay fully usable; organisation admins see a prompt on the dashboard and Sites page.
+  - Site managers: organisation admins appoint and reassign them from the site page or People; one manager can manage several sites; a manager may also (optionally) have a brand, region or area. Direct site managers see every RA at their sites (they are responsible for the whole premises); brand-specific rules for brand managers are unchanged.
+  - People: organisation admins manage everyone in their organisation; site managers add and manage staff at their own sites only; staff cannot add anyone. Adding a person sends an invitation email automatically; "Send invitation" / "Send sign-in link" resends it.
+  - Sign-in: email + password alongside one-time email links; "Forgot password"; set or change password from the **Password** button; new users are prompted to set one; superadmins can send a password reset (Safetybiz team and organisation people).
+  - Navigation: organisation admins — Dashboard, Sites, Risk assessments, Compliance centre, Actions, People, Sign-offs, Settings (Organisation details, Legal entities, Brands, Regions and areas). Managers — Dashboard, Assigned sites, Risk assessments, Compliance centre, Actions, People, Sign-offs. Staff — My risk assessments, Awaiting my acknowledgement, My sign-off history (no Compliance centre, certificates, service jobs, reports or settings). Policies, Reports, Contact Safetybiz and Branding arrive in Releases B and D.
+  - Safetybiz organisation profile is tabbed: Overview, Sites, Legal entities, Brands and regions, People, Settings (details, sectors, test organisation).
+  - Test organisations: superadmin marks an organisation as test, sees what will be removed, types the name and a reason; deletion is logged. Real organisations cannot be deleted.
+  - Mobile: the sideways-scrolling menu is replaced by a Menu button; checked with no sideways scrolling on every page of each role at 390 px.
+  - Site form: the old free-text "Site manager" fields are renamed "Site contact (day to day)".
 - 27 Nov: **Releases 1 and 2 and the certificate delete deployed live.**
   - Before: local tests passed (`test_011` 63/63, `test_012` 16/16, `e2e_r2` 22/22, `e2e_certdel` 9/9, structure, CH and permission e2e). Backup schema `backup_20261127` taken; rollback rehearsed.
   - Deployed: migrations 011 and 012; data step (Crawley kept with all its records, head office flag removed; nothing deleted); `companies-house` function v2; app files. Commits 2e9cc6f, da296a8, 87ccf61, a50cf58, cd045fa (`admin.js`), each checked byte-for-byte against GitHub (`admin.js` differs only in two literal non-breaking spaces in place of their escape codes, the same string at runtime).
@@ -120,6 +134,8 @@ Updated 27 Nov 2026. Live: https://safetybizone.netlify.app/ · Repo: safetybizo
 - No percentage score on RAs.
 - Food safety work is parked.
 - Show before pushing: build and test locally, send screenshots, then wait for "push it". Never push `config.js`.
+- Audit readiness is shown as red / amber / green readiness, never as a guarantee of legal compliance.
+- 27 Nov decisions: four releases A–D; email/password sign-in alongside one-time email links (users set and reset their own passwords; superadmins can send resets); sites without a manager become Pending setup without blocking records; policies from Safetybiz templates and organisation uploads.
 - Review decisions of 27 Nov (doc: https://claude.ai/artifact/HFcMzw2EYpQBm3P32EiVb6):
   - Head office sites: stop creating them automatically; delete the two existing ones (all current data is test data).
   - Company administrator stays required at onboarding.
@@ -134,12 +150,20 @@ Updated 27 Nov 2026. Live: https://safetybizone.netlify.app/ · Repo: safetybizo
 
 ## Planned
 - Rollback for Releases 1+2 if ever needed: `rollback-011.sql`, then re-apply 006 to 009, then redeploy the previous app files (rehearsed). Keep `backup_20261127` until Release 3 is live.
-1. **Release 3 (not started, awaiting approval):** RA register, approved templates (RA and service), compliance status from applicable types.
+- Consolidated requirements (27 Nov), agreed sequence, one production push each, approval before each:
+  1. **Release A — roles and structure:** live 27 Nov, see Completed.
+  2. **Release B — policies and acknowledgements:** Safetybiz policy templates and organisation uploads; assigned to sites and staff; versions; staff acknowledgement (employee, version, date and time); monitoring for managers and admins; email when an acknowledgement is due (needs SMTP).
+  3. **Release C — certificates:** PAT visual inspection (visual-only vs electrical test, never shown as tested when not done); withdraw / void / replace with history and links; defects stay open.
+  4. **Release D — contact, branding, reports, mobile assessments:** Contact Safetybiz (advice, site visit, technical query, extra services, attachments, history, team notification); organisation logo and colours with "Powered by Safetybiz One" (certificates keep the issuer's identity); reports (compliance by site, actions, acknowledgements; PDF/CSV); risk assessments created and completed on phones (assessors: organisation admins and managers ticked "can create risk assessments"), camera photos, drafts.
+     - **Audit readiness dashboard** (part of the reporting scope, built from the existing dashboards and data, not a separate module). Purpose: Visibility, Reducing Liability, Empowerment. Shows outstanding and overdue actions; missing, expired and upcoming certificate renewals; risk assessments due for review; outstanding staff acknowledgements (from Release B); readiness by site, brand, region and organisation; every item links straight to where it is fixed. Red / amber / green indicators, worded as "audit readiness" — never as a guarantee of legal compliance.
+  5. Earlier Release 3 items (RA register, approved RA and service templates, compliance from applicable types) follow, or fold into B–D where they fit.
 
 ## Outstanding issues
 - Default certificate list still to be confirmed (used only in Release 3; the current certificate list and N/A are unchanged).
 - `clients` still has the old Companies House columns (now unused); drop them in a later clean-up.
 - Companies House: do one real search in the app as an admin (add a legal entity) to confirm the full lookup.
+- **Email (SMTP) is needed** for invitations, password resets, email links and (Release B) acknowledgement emails to reach real users: Supabase's built-in sender only allows a few emails an hour. Set up a sender (e.g. Resend or Postmark) on safetybiz.co.uk and enter it under Supabase → Authentication → Emails → SMTP. Password sign-in works without it.
+- Supabase → Authentication → URL configuration must list https://safetybizone.netlify.app/ as Site URL / redirect URL (invitation and reset links return there).
 - Hosting: Netlify Free ran out of credits on 27 Nov (each production deploy costs 15 of 300), so today's pushes were skipped. Upgraded to Personal ($9/month, 1,000 credits). Push each release as ONE commit to save credits.
 - Possible later option: withdraw a certificate (keep it, mark it void) instead of deleting.
 - Default applicable certificate list not yet confirmed (proposal in the review doc).
