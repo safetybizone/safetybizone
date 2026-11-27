@@ -1,5 +1,6 @@
 // PDF exports: risk assessment report (laid out like the printed sample) and sign-off records.
 import { band, BANDCOL, fd, ft, COMPANY, toast } from './core.js';
+import { photoData } from './photos.js';
 
 const TEAL = [21, 63, 67], OR = [250, 70, 22], INK = [16, 41, 43], MUTE = [93, 111, 112], LINE = [227, 232, 231], MINT = [67, 185, 165];
 const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
@@ -25,10 +26,34 @@ function section(doc, y, title) {
   return y + 6;
 }
 function ensure(doc, y, need) { if (y + need > 280) { doc.addPage(); return 20; } return y; }
+// Photos under a hazard: a caption, then the photos in rows of three.
+async function photoBlock(doc, y, items) {
+  for (const [cap, paths] of items) {
+    if (!paths || !paths.length) continue;
+    y = ensure(doc, y, 52); doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(...MUTE);
+    const cl = doc.splitTextToSize(cap, W - 2 * M); doc.text(cl, M, y + 3); y += cl.length * 4 + 2;
+    let x = M, rowH = 0;
+    for (const p of paths) {
+      const im = await photoData(p); if (!im) continue;
+      const k = Math.min(56 / im.w, 42 / im.h), w = im.w * k, h = im.h * k;
+      if (x > M && x + 56 > W - M + 0.5) { y += rowH + 3; x = M; rowH = 0; }
+      if (y + h > 282) { doc.addPage(); y = 20; x = M; rowH = 0; }
+      try { doc.addImage(im.url, 'JPEG', x, y, w, h); } catch (e) { /* skip */ }
+      x += 60; rowH = Math.max(rowH, h);
+    }
+    if (rowH) y += rowH + 5;
+  }
+  doc.setFont('helvetica', 'normal'); doc.setTextColor(...INK);
+  return y;
+}
 
 // Score helpers shared with the screens: N/A answers don't count.
 export const ctlScore = (list) => { const n = list.filter((c) => c.state !== 'N/A').length, y = list.filter((c) => c.state === 'In place').length; return { y, n, f: list.filter((c) => c.state === 'Planned').length }; };
 export const cmpScore = (items) => { const n = items.filter((i) => i.a === 'Yes' || i.a === 'No').length, y = items.filter((i) => i.a === 'Yes').length; return { y, n, f: items.filter((i) => i.a === 'No').length }; };
+// Overall score: a hazard with no control measures counts as one flagged item, so it can never show 100%.
+export const raScore = (hazards, general = []) => { const k = ctlScore(hazards.flatMap((h) => h.controls || []).concat(general)), gaps = hazards.filter((h) => !(h.controls || []).length).length; return { y: k.y, n: k.n + gaps, f: k.f + gaps, gaps }; };
+// Plain words for a list of controls (no percentage scores on risk assessments).
+export const ctlLabel = (list) => { const k = ctlScore(list); return !list.length ? 'No controls — flagged' : k.f ? `${k.f} not in place` : k.n ? 'All in place' : 'All N/A'; };
 export const pct = ({ y, n }) => (n ? `${y} / ${n} (${Math.round((y / n) * 100)}%)` : '–');
 const STATE = { 'In place': 'Yes — in place', Planned: 'No — not in place', 'N/A': 'N/A' };
 
@@ -39,8 +64,9 @@ export async function assessmentPDF(m) {
   try {
     const doc = newDoc(), lg = await logo();
     const hz = m.hazards || [], comp = m.compliance || [], gen = m.controls || [];
-    const allCtl = hz.flatMap((h) => h.controls || []).concat(gen), cs = cmpScore(comp), ks = ctlScore(allCtl);
-    const total = { y: cs.y + ks.y, n: cs.n + ks.n }, flagged = cs.f + ks.f, complete = !!m.approved_at;
+    const cs = cmpScore(comp), ks = raScore(hz, gen);
+    // no percentage score on risk assessments: flagged items and actions only
+    const flagged = cs.f + ks.f, complete = !!m.approved_at;
     const tbl = (opts) => { doc.autoTable({ margin: { left: M, right: M }, styles: { fontSize: 8.5, cellPadding: 2.2, textColor: INK, lineColor: LINE, lineWidth: 0.1 }, headStyles: { fillColor: TEAL, textColor: 255, fontStyle: 'bold' }, ...opts }); return doc.lastAutoTable.finalY; };
     const sectionBar = (y, title, right) => tbl({ startY: y, head: [[{ content: title, styles: { halign: 'left' } }, { content: right || '', styles: { halign: 'right' } }]], body: [], columnStyles: { 1: { cellWidth: 60 } } });
     // header
@@ -52,7 +78,7 @@ export async function assessmentPDF(m) {
     let y = 33 + tl.length * 7.5;
     doc.setFontSize(9); doc.setTextColor(...MUTE); doc.text(`${fd(m.assessment_date)} / ${m.assessor || '—'}  ·  ${m.ref}  ·  ${m.versionLabel}`, M, y); y += 5;
     y = tbl({ startY: y, theme: 'grid', styles: { fontSize: 9, cellPadding: 3, halign: 'center' }, headStyles: { fillColor: [239, 247, 245], textColor: INK },
-      head: [['Score', 'Flagged items', 'Actions']], body: [[pct(total), String(flagged), String(m.actions.length)]] }) + 4;
+      head: [['Flagged items', 'Actions']], body: [[String(flagged), String(m.actions.length)]] }) + 4;
     y = tbl({ startY: y, theme: 'plain', styles: { fontSize: 9, cellPadding: 2 }, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 45 } },
       body: [['Client', m.client], ['Site conducted', m.site || '—'], ['Conducted on', fd(m.assessment_date)], ['Prepared by', m.assessor || '—'], ['Location', m.siteAddress || '—'], ['Accompanied by', m.accompanied_by || '—'], ['Renewal date', fd(m.review_date)]] }) + 3;
     if (m.description || (m.people || []).length) {
@@ -68,19 +94,19 @@ export async function assessmentPDF(m) {
     }
     // flagged items
     const flags = comp.filter((c) => c.a === 'No').map((c) => ['Health and Safety Compliance Documents', c.q, 'No' + (c.note ? ` — ${c.note}` : '')])
-      .concat(hz.flatMap((h) => (h.controls || []).filter((c) => c.state === 'Planned').map((c) => [h.title, c.title, 'Not in place'])), gen.filter((c) => c.state === 'Planned').map((c) => ['General controls', c.title, 'Not in place']));
+      .concat(hz.filter((h) => !(h.controls || []).length).map((h) => [h.title, 'No control measures recorded', 'Not in place']), hz.flatMap((h) => (h.controls || []).filter((c) => c.state === 'Planned').map((c) => [h.title, c.title, 'Not in place'])), gen.filter((c) => c.state === 'Planned').map((c) => ['General controls', c.title, 'Not in place']));
     y = sectionBar(ensure(doc, y, 20), 'Flagged items', `${flags.length} flagged`);
     y = flags.length ? tbl({ startY: y, theme: 'plain', body: flags, columnStyles: { 0: { textColor: MUTE, cellWidth: 55 }, 2: { textColor: [215, 38, 30], cellWidth: 40 } } }) + 5 : tbl({ startY: y, theme: 'plain', body: [['Nothing flagged.']] }) + 5;
     // compliance
     if (comp.length) {
-      y = sectionBar(ensure(doc, y, 20), 'Health and Safety Compliance Documents', `${cs.f} flagged, ${pct(cs)}`);
+      y = sectionBar(ensure(doc, y, 20), 'Health and Safety Compliance Documents', `${cs.f} flagged`);
       y = tbl({ startY: y, theme: 'plain', body: comp.map((c) => [c.q + (c.note ? `\n${c.note}` : ''), c.a || '—']), columnStyles: { 1: { cellWidth: 30, fontStyle: 'bold' } },
         didParseCell: (d) => { if (d.section === 'body' && d.column.index === 1 && d.cell.raw === 'No') d.cell.styles.textColor = [215, 38, 30]; } }) + 5;
     }
     // hazard sections
     for (const h of hz) {
       const ctl = h.controls || [], sc = ctlScore(ctl), rs = (h.risk_l || 0) * (h.risk_s || 0), acts = h.actions || [];
-      y = sectionBar(ensure(doc, y, 30), h.title || 'Untitled hazard', pct(sc));
+      y = sectionBar(ensure(doc, y, 30), h.title || 'Untitled hazard', ctlLabel(ctl));
       const body = [];
       if (h.description) body.push([{ content: h.description, colSpan: 2, styles: { textColor: MUTE } }]);
       ctl.forEach((c) => body.push([c.title + (c.description ? `\n${c.description}` : ''), STATE[c.state] || c.state]));
@@ -92,15 +118,18 @@ export async function assessmentPDF(m) {
         didParseCell: (d) => { if (d.section !== 'body' || d.column.index !== 1) return; const t = String(d.cell.raw || '');
           if (t.startsWith('No —')) d.cell.styles.textColor = [215, 38, 30]; if (t.startsWith('Yes')) d.cell.styles.textColor = [31, 125, 109];
           if (rs && d.row.raw[0]?.content === 'Risk score') { d.cell.styles.fillColor = hex(BANDCOL[band(rs).k]); d.cell.styles.textColor = band(rs).k === 'vh' ? 255 : INK; } } }) + 5;
+      y = await photoBlock(doc, y, ctl.map((c) => ['Control: ' + (c.title || ''), c.photos]).concat(acts.map((x) => ['Action: ' + (x.title || ''), x.photos])));
     }
     if (gen.length) {
-      y = sectionBar(ensure(doc, y, 20), 'General controls', pct(ctlScore(gen)));
+      y = sectionBar(ensure(doc, y, 20), 'General controls', ctlLabel(gen));
       y = tbl({ startY: y, theme: 'plain', body: gen.map((c) => [c.title + (c.description ? `\n${c.description}` : ''), STATE[c.state] || c.state]), columnStyles: { 1: { cellWidth: 62 } } }) + 5;
+      y = await photoBlock(doc, y, gen.map((c) => ['Control: ' + (c.title || ''), c.photos]));
     }
     const other = m.actions.filter((x) => !x.assessment_hazard_id || !hz.some((h) => h.id === x.assessment_hazard_id));
     if (other.length) {
       y = sectionBar(ensure(doc, y, 20), 'Other actions', String(other.length));
       y = tbl({ startY: y, head: [['Action', 'Owner', 'Due', 'Priority', 'Status']], body: other.map((x) => [x.title || 'Untitled', x.owner || '—', fd(x.due_date), x.priority, x.status]), columnStyles: { 0: { cellWidth: 80 } } }) + 5;
+      y = await photoBlock(doc, y, other.map((x) => ['Action: ' + (x.title || ''), x.photos]));
     }
     if (m.audits && m.audits.length) {
       y = sectionBar(ensure(doc, y, 20), 'Audits', String(m.audits.length));
