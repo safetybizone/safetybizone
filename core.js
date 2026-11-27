@@ -208,13 +208,29 @@ export const ICON = {
   sign: '<path d="M3 17c3-1 4-6 6-6s1 5 3 5 3-4 5-4 2 2 4 2M3 21h18"/>',
   team: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5M16 5a3 3 0 0 1 0 6M18 15c2 .5 3 2 3 5"/>',
   staff: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5M16 5a3 3 0 0 1 0 6M18 15c2 .5 3 2 3 5"/>',
+  site: '<path d="M3 21h18M5 21V9l7-5 7 5v12M10 21v-6h4v6"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
 };
 export const svg = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">${ICON[k] || ''}</svg>`;
 
 // Shell with sidebar.
 export function shell({ nav, active, title, me, body, right = '' }) {
-  return `<div class="shell"><aside><img class="lg" src="logo-dark-bg.png" alt="${esc(COMPANY)} — Safety made easy">
+  return `<div class="shell"><aside><img class="lg" src="logo-dark-bg.png" alt="${esc(COMPANY)} — Safety made easy"><button class="mnav" data-act="menu" aria-label="Menu">☰ Menu</button>
   <div class="grp">${esc(me.group)}</div><div class="navs">${nav.map((n) => `<a class="nv${n.k === active ? ' on' : ''}" href="#/${n.href}">${svg(n.icon)}${esc(n.label)}${n.c ? `<span class="c">${n.c}</span>` : ''}</a>`).join('')}</div>
-  <div class="me"><b>${esc(me.name)}</b><span>${esc(me.sub)}</span><br><button data-act="signout">Sign out</button></div></aside>
+  <div class="me"><b>${esc(me.name)}</b><span>${esc(me.sub)}</span><br><button data-act="account">Password</button> <button data-act="signout">Sign out</button></div></aside>
   <div><div class="topbar"><h1>${esc(title)}</h1>${right}<span class="sv" id="sv">All changes saved</span></div>${body}</div></div>`;
+}
+
+// ---------- invitations and password resets ----------
+// Emails an invitation through the "invite-user" function (the database checks the sender may manage that person).
+export async function sendInvite(inviteId) {
+  const { data, error } = await sb.functions.invoke('invite-user', { body: { invite_id: inviteId, redirect: location.origin + location.pathname } });
+  if (error || !data?.ok) { toast((data && data.error) || 'The invitation email could not be sent. Try "Send invitation" again later.', true); return false; }
+  toast(data.existing ? 'Sign-in link emailed (they already have an account)' : 'Invitation emailed'); return true;
+}
+// A password reset email; the link lets them choose a new password.
+export async function sendReset(email) {
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+  if (error) { toast(error.message, true); return false; }
+  toast('Password reset email sent to ' + email); return true;
 }
