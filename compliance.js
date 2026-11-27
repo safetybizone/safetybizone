@@ -149,7 +149,8 @@ function ccSite(sid, ctx) {
   fhrsRefreshStale([s], 1);
   return `<div class="page"><a class="btn sm ghost" href="#/${ctx.base}">← Compliance centre</a>
   <div class="sect" style="margin-top:8px"><div><h2>${esc(s.name)}</h2><p class="hint">${ctx.admin ? esc(ctx.clientName(s.client_id)) + ' · ' : ''}${esc(s.address || 'No address recorded')}</p></div>
-  <div class="row">${tag('Valid')} ${c.Valid} ${tag('Due soon')} ${c['Due soon']} ${tag('Expired')} ${c.Expired} ${tag('Missing')} ${c.Missing}</div></div>
+  <div class="row">${tag('Valid')} ${c.Valid} ${tag('Due soon')} ${c['Due soon']} ${tag('Expired')} ${c.Expired} ${tag('Missing')} ${c.Missing}${ctx.admin ? `<button class="btn sm pri" data-act="svNew" data-s="${sid}">+ Service job</button>` : ''}</div></div>
+  ${defectsPanel(sid)}
   ${fhrsPanel(s)}
   <h3 style="font-size:16px;margin:6px 0 10px">Certificates and service records</h3>
   <div class="tw"><table class="stack"><thead><tr><th>Document</th><th>Status</th><th>Issued</th><th>Expires</th><th>Provider / reference</th><th>File</th><th></th></tr></thead><tbody>${docTypes().map((t) => {
@@ -163,6 +164,15 @@ function ccSite(sid, ctx) {
   <p class="hint">Upload a PDF or photo of each certificate (up to ${MAX_MB} MB). The expiry date fills in from the document type's usual validity — change it if the certificate says otherwise. Earlier certificates are kept in the history.</p></div>`;
 }
 
+// Open defects found on Safetybiz service visits for this site (fire alarm, emergency lighting, extinguishers, PAT, fire risk assessment).
+function defectsPanel(sid) {
+  const list = rows('actions').filter((x) => x.site_id === sid && x.service_job_id && x.status !== 'Done').sort((a, b) => String(a.due_date || '9').localeCompare(String(b.due_date || '9')));
+  if (!list.length) return '';
+  const od = (x) => x.due_date && x.due_date < today();
+  return `<div class="panel" style="margin-bottom:16px;border-left:4px solid var(--vh)"><h3 style="font-size:16px;margin-bottom:6px">Defects from service visits (${list.length})</h3>${list.map((x) => { const j = byId('service_jobs', x.service_job_id);
+    const sv = x.severity || x.priority, hi = ['High', 'Substantial', 'Intolerable', 'Urgent'].includes(sv), mid = ['Medium', 'Moderate'].includes(sv);
+    return `<div class="li"><span class="tag ${hi ? 'bad' : mid ? 'warn' : ''}">${esc(sv)}</span><span style="flex:1"><b>${esc(x.title)}</b><br><span class="muted">${j ? (window.__me ? `<a href="#/service/${j.id}">${esc(j.cert_no)}</a> · ` : `${esc(j.cert_no)} · `) : ''}${od(x) ? '<b style="color:var(--vh)">overdue</b> · ' : ''}due ${fd(x.due_date)}${x.status === 'In progress' ? ' · in progress' : ''}</span></span><button class="btn sm" data-act="ccDefDone" data-id="${x.id}">Mark done</button></div>`; }).join('')}</div>`;
+}
 function uploadModal(sid, tid) {
   const s = byId('sites', sid), t = byId('compliance_doc_types', tid), prev = current(sid, tid);
   openModal(`<h3>${esc(t.name)}</h3><p class="muted" style="margin-top:-6px">${esc(s.name)}</p>
@@ -212,6 +222,7 @@ function typesModal() {
 export async function ccClick(d, btn) {
   switch (d.act) {
     case 'ccFilter': S.status = d.v; window.__render(); return true;
+    case 'ccDefDone': if (await confirmBox('Mark this defect as fixed?', 'Mark done')) { await upd('actions', d.id, { status: 'Done', completed_on: today() }).catch(() => {}); toast('Defect marked as done'); window.__render(); } return true;
     case 'ccFsaFind': fsaModal(d.s); return true;
     case 'ccFsaSearch': await fsaSearch(d.s, btn); return true;
     case 'ccFsaLink': { const r = lastResults[d.id]; if (!r) return true; closeModal();
