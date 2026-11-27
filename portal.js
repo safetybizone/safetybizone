@@ -1,7 +1,7 @@
 // Safetybiz One client portal: client managers and staff.
 import {
   sb, D, $, esc, uid, today, fd, ft, chip, scoreOf, isOd, ratingCard, toast, openModal, closeModal, confirmBox,
-  fetchAll, rows, byId, ins, upd, del, niceError, shell, signFormHTML, mountPad, submitSignOff,
+  fetchAll, rows, byId, ins, upd, del, niceError, shell, signFormHTML, mountPad, submitSignOff, sendInvite,
 } from './core.js';
 import { assessmentPDF, signOffsPDF, ctlScore, ctlLabel } from './pdf.js';
 import { ccView, ccClick, fhrsChip, siteCounts } from './compliance.js';
@@ -41,20 +41,31 @@ const profByEmail = (e) => rows('profiles').find((p) => p.email === e);
 export function portalView(r) {
   route = r;
   const L = latest(), todo = L.filter((a) => !mySigned(a)).length;
-  const nav = [{ k: 'home', href: '', icon: 'ra', label: isMgr() ? 'Risk assessments' : 'My risk assessments', c: todo || '' }];
   const openActs = rows('actions').filter((x) => x.status !== 'Done').length;
-  if (isMgr()) nav.push({ k: 'actions', href: 'actions', icon: 'acts', label: 'Actions', c: openActs || '' }, { k: 'compliance', href: 'compliance', icon: 'cert', label: 'Compliance centre' }, { k: 'records', href: 'records', icon: 'sign', label: 'Sign-off records' }, { k: 'staff', href: 'staff', icon: 'staff', label: 'Staff' });
-  let active = 'home', title = isMgr() ? 'Risk assessments' : 'My risk assessments', body;
-  if (r[0] === 'a') { title = 'Risk assessment'; body = vAssessment(r[1]); }
+  // Managers: Dashboard, Assigned sites, Risk assessments, Compliance centre, Actions, People, Sign-offs.
+  // Staff: My risk assessments, Awaiting my acknowledgement, My sign-off history. (No certificates, service jobs, reports or settings.)
+  const nav = isMgr()
+    ? [{ k: 'home', href: '', icon: 'dash', label: 'Dashboard' }, { k: 'sites', href: 'sites', icon: 'site', label: 'Assigned sites' }, { k: 'ras', href: 'ras', icon: 'ra', label: 'Risk assessments', c: todo || '' },
+      { k: 'compliance', href: 'compliance', icon: 'cert', label: 'Compliance centre' }, { k: 'actions', href: 'actions', icon: 'acts', label: 'Actions', c: openActs || '' }, { k: 'staff', href: 'staff', icon: 'team', label: 'People' }, { k: 'records', href: 'records', icon: 'sign', label: 'Sign-offs' }]
+    : [{ k: 'home', href: '', icon: 'ra', label: 'My risk assessments' }, { k: 'todo', href: 'todo', icon: 'acts', label: 'Awaiting my acknowledgement', c: todo || '' }, { k: 'history', href: 'history', icon: 'sign', label: 'My sign-off history' }];
+  let active = 'home', title = isMgr() ? 'Dashboard' : 'My risk assessments', body;
+  if (r[0] === 'a') { active = isMgr() ? 'ras' : 'home'; title = 'Risk assessment'; body = vAssessment(r[1]); }
   else if (r[0] === 'actions' && isMgr()) { active = 'actions'; title = 'Actions'; body = vActions(); }
-  else if (r[0] === 'records' && isMgr()) { active = 'records'; title = 'Sign-off records'; body = vRecords(); }
-  else if (r[0] === 'staff' && isMgr()) { active = 'staff'; title = 'Staff'; body = vStaff(); }
+  else if (r[0] === 'records' && isMgr()) { active = 'records'; title = 'Sign-offs'; body = vRecords(); }
+  else if (r[0] === 'staff' && isMgr()) { active = 'staff'; title = 'People'; body = vStaff(); }
+  else if (r[0] === 'sites' && isMgr()) { active = 'sites'; title = 'Assigned sites'; body = vHome(L, 'sites'); }
+  else if (r[0] === 'ras' && isMgr()) { active = 'ras'; title = 'Risk assessments'; body = vHome(L, 'ras'); }
   else if (r[0] === 'compliance' && isMgr()) { active = 'compliance'; title = 'Compliance centre'; body = ccView(r, { admin: false, base: 'compliance' }); }
-  else body = vHome(L);
-  return shell({ nav, active, title, body, me: { group: company().toUpperCase(), name: S.me.full_name || S.me.email, sub: S.me.role === 'manager' ? (myUnit() ? `${MGR_TITLE[myUnit().kind]} · ${myUnit().name}` : 'Manager') : isMgr() ? 'Manager' : (S.me.job_title || 'Staff') } });
+  else if (r[0] === 'todo' && !isMgr()) { active = 'todo'; title = 'Awaiting my acknowledgement'; body = vHome(L, 'todo'); }
+  else if (r[0] === 'history' && !isMgr()) { active = 'history'; title = 'My sign-off history'; body = vHistory(); }
+  else body = vHome(L, isMgr() ? 'dash' : 'ras');
+  return shell({ nav, active, title, body, me: { group: company().toUpperCase(), name: S.me.full_name || S.me.email, sub: S.me.role === 'manager' ? (myUnit() ? `${MGR_TITLE[myUnit().kind]} · ${myUnit().name}` : 'Site manager') : isMgr() ? 'Manager' : (S.me.job_title || 'Staff') } });
 }
-
-function vHome(L) {
+function vHistory() {
+  const mine = rows('acknowledgements').filter((k) => k.user_id === S.me.id).sort((a, b) => b.acknowledged_at.localeCompare(a.acknowledged_at));
+  return `<div class="page"><div class="sect"><h2>${mine.length} sign-off${mine.length === 1 ? '' : 's'}</h2></div><p class="hint" style="margin-top:0">Each entry records the document, its version, and the date and time you confirmed you had read and understood it.</p>${ackRows(mine, {}, true)}</div>`;
+}
+function vHome(L, part) {
   const first = (S.me.full_name || '').split(' ')[0];
   if (!L.length) return `<div class="page"><h2 style="margin-bottom:6px">Hello${first ? ', ' + esc(first) : ''}</h2><div class="empty"><h3>No risk assessments yet</h3><p class="muted">When Safetybiz publishes a risk assessment for ${isMgr() ? 'your company' : 'your site'}, it will appear here for you to read and sign.</p></div></div>`;
   const todo = L.filter((a) => !mySigned(a));
@@ -72,11 +83,13 @@ function vHome(L) {
     ${myActs.map((x) => { const a = L.find((y) => y.id === x.assessment_id); return `<a class="todo" href="${x.assessment_id ? '#/a/' + x.assessment_id : '#/compliance/' + x.site_id}"><span class="n">!</span><span style="flex:1"><b>${esc(x.title)}</b><br><span class="muted">Action for you${a ? ' · ' + esc(a.title) : ''} · due ${fd(x.due_date)}${isOd(x) ? ' · <b style="color:var(--vh)">overdue</b>' : ''}</span></span></a>`; }).join('')}
     ${nTodo ? '' : '<div class="todo done"><span class="n" style="background:var(--soft);color:#1f7d6d">✓</span><span><b>You\'re all up to date</b><br><span class="muted">Nothing to sign and no actions waiting for you.</span></span></div>'}</div>`;
   const siteBlock = isMgr() ? `<div class="panel" style="margin-bottom:16px"><div class="sect" style="margin-bottom:8px"><h3>Your sites</h3><a class="btn sm" href="#/compliance">Compliance centre</a></div><div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Food hygiene</th><th>Certificates</th><th>Open actions</th></tr></thead><tbody>${rows('sites').filter((st) => (st.status || 'Open') !== 'Archived').map((st) => { const c = siteCounts(st.id), oa = rows('actions').filter((x) => x.status !== 'Done' && (x.site_id === st.id || L.find((a) => a.id === x.assessment_id && a.site_id === st.id))).length;
-    return `<tr class="click" data-go="compliance/${st.id}"><td data-l="Site"><b>${esc(st.name)}</b></td><td data-l="Food hygiene">${fhrsChip(st)}</td><td data-l="Certificates">${c.Expired ? `<span class="tag bad">${c.Expired} expired</span> ` : ''}${c['Due soon'] ? `<span class="tag warn">${c['Due soon']} due soon</span> ` : ''}${c.Missing ? `<span class="tag miss">${c.Missing} missing</span>` : ''}${!c.Expired && !c['Due soon'] && !c.Missing ? '<span class="tag ok">Up to date</span>' : ''}</td><td data-l="Open actions">${oa}</td></tr>`; }).join('')}</tbody></table></div></div>`
+    return `<tr class="click" data-go="compliance/${st.id}"><td data-l="Site"><b>${esc(st.name)}</b>${st.status && st.status !== 'Open' ? ` <span class="tag warn">${esc(st.status)}</span>` : ''}</td><td data-l="Food hygiene">${fhrsChip(st)}</td><td data-l="Certificates">${c.Expired ? `<span class="tag bad">${c.Expired} expired</span> ` : ''}${c['Due soon'] ? `<span class="tag warn">${c['Due soon']} due soon</span> ` : ''}${c.Missing ? `<span class="tag miss">${c.Missing} missing</span>` : ''}${!c.Expired && !c['Due soon'] && !c.Missing ? '<span class="tag ok">Up to date</span>' : ''}</td><td data-l="Open actions">${oa}</td></tr>`; }).join('')}</tbody></table></div></div>`
     : (() => { const st = byId('sites', S.me.site_id); return st && st.fhrs_id ? `<div class="panel" style="margin-bottom:16px"><span class="muted">Your site</span><br><b>${esc(st.name)}</b> · food hygiene rating ${fhrsChip(st)}</div>` : ''; })();
-  return `<div class="page"><div class="sect"><div><h2>Hello${first ? ', ' + esc(first) : ''}</h2><p class="muted" style="margin:4px 0 0">${isMgr() ? `You look after ${rows('sites').length} site${rows('sites').length === 1 ? '' : 's'}.` : nTodo ? 'Here is what needs doing.' : 'You\'re up to date.'}</p></div></div>${stats}${isMgr() ? siteBlock + (todo.length ? todoBlock : '') : todoBlock + siteBlock}
-  <h3 style="font-size:16px;margin:18px 0 4px">All risk assessments</h3>
-  ${Object.keys(bySite).map((sid) => `<h3 style="font-size:16px;margin:18px 0 10px">${esc(sName(sid) || 'Site')}</h3><div class="cards">${bySite[sid].map((a) => card(a)).join('')}</div>`).join('')}</div>`;
+  if (part === 'sites') return `<div class="page">${siteBlock}</div>`;
+  if (part === 'todo') return `<div class="page">${todoBlock}</div>`;
+  const cards = `${Object.keys(bySite).map((sid) => `<h3 style="font-size:16px;margin:18px 0 10px">${esc(sName(sid) || 'Site')}</h3><div class="cards">${bySite[sid].map((a) => card(a)).join('')}</div>`).join('') || '<div class="empty"><h3>No risk assessments yet</h3><p class="muted">Published risk assessments for your site appear here.</p></div>'}`;
+  if (part === 'ras') return `<div class="page">${!isMgr() && todo.length ? `<p class="pwbar" style="margin:0 0 14px"><span><b>${todo.length} to read and sign.</b></span><a class="btn sm pri" href="#/todo">Show me</a></p>` : ''}${cards}</div>`;
+  return `<div class="page"><div class="sect"><div><h2>Hello${first ? ', ' + esc(first) : ''}</h2><p class="muted" style="margin:4px 0 0">${isMgr() ? `You look after ${rows('sites').length} site${rows('sites').length === 1 ? '' : 's'}.` : nTodo ? 'Here is what needs doing.' : 'You\'re up to date.'}</p></div></div>${stats}${siteBlock}${todo.length ? todoBlock : ''}</div>`;
 }
 function card(a) {
   const signed = mySigned(a), aud = isMgr() ? audience(a) : [], n = isMgr() ? aud.filter((i) => { const p = profByEmail(i.email); return p && signedUsers(a).has(p.id); }).length : 0;
@@ -168,13 +181,13 @@ function vRecords() {
 function vStaff() {
   const inv = [...rows('portal_invites')].sort((a, b) => (a.full_name || a.email).localeCompare(b.full_name || b.email));
   const sites = rows('sites');
-  return `<div class="page"><div class="sect"><div><h2>Staff</h2><p class="hint">Add your staff so they can read and sign risk assessments. Staff see their site (or all sites). Managers see everything and keep the records.</p></div><button class="btn pri" data-act="addStaff">+ Add staff member</button></div>
+  return `<div class="page"><div class="sect"><div><h2>People</h2><p class="hint">Add staff at your sites so they can read and sign risk assessments. They get an invitation email.</p></div><button class="btn pri" data-act="addStaff">+ Add staff member</button></div>
   <div class="tw"><table class="stack"><thead><tr><th>Name</th><th>Email</th><th>Job title</th><th>Role</th><th>Site</th><th>Status</th><th>Sign-offs</th><th></th></tr></thead><tbody>${inv.map((i) => { const p = profByEmail(i.email), me = p && p.id === S.me.id; return `<tr><td data-l="Name"><b>${esc(i.full_name || '—')}</b>${me ? ' <span class="muted">(you)</span>' : ''}</td><td data-l="Email">${esc(i.email)}</td><td data-l="Job title">${esc(i.job_title || '—')}</td>
   <td data-l="Role">${me ? 'Manager' : S.me.role === 'manager' ? 'Staff' : `<select id="st-${i.id}-r" data-st="${i.id}|role"><option value="staff"${i.role === 'staff' ? ' selected' : ''}>Staff</option><option value="client_admin"${i.role === 'client_admin' ? ' selected' : ''}>Manager</option></select>`}</td>
   <td data-l="Site"><select id="st-${i.id}-s" data-st="${i.id}|site_id">${S.me.role === 'manager' ? '' : '<option value="">All sites</option>'}${sites.map((s) => `<option value="${s.id}"${i.site_id === s.id ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select></td>
   <td data-l="Status">${p ? '<span class="tag ok">Joined</span>' : '<span class="tag">Invited</span>'}</td><td data-l="Sign-offs">${p ? rows('acknowledgements').filter((k) => k.user_id === p.id && k.method === 'Own account').length : 0}</td>
-  <td>${me ? '' : `<button class="btn sm ghost" data-act="delStaff" data-id="${i.id}">Remove</button>`}</td></tr>`; }).join('')}</tbody></table></div>
-  <p class="hint">Send new staff the portal address: <b>${esc(location.origin + location.pathname)}</b>. They sign in with their email — no password needed. Staff without email can sign in person on your device from any risk assessment.</p></div>`;
+  <td>${me ? '' : `<div class="row" style="flex-wrap:nowrap"><button class="btn sm ghost" data-act="reinvite" data-id="${i.id}">${p ? 'Send sign-in link' : 'Send invitation'}</button><button class="btn sm ghost" data-act="delStaff" data-id="${i.id}">Remove</button></div>`}</td></tr>`; }).join('')}</tbody></table></div>
+  <p class="hint">Portal address: <b>${esc(location.origin + location.pathname)}</b>. People sign in with an email link or their password. Staff without email can sign in person on your device from any risk assessment.</p></div>`;
 }
 
 export async function portalClick(e, b) {
@@ -208,8 +221,9 @@ export async function portalClick(e, b) {
       const email = $('#sf-e').value.trim().toLowerCase(); if (!/^\S+@\S+\.\S+$/.test(email)) return toast('Enter a valid email', true);
       if (S.me.role === 'manager' && !$('#sf-s').value) return toast('Choose their site', true);
       const row = { email, role: $('#sf-r').value, client_id: S.me.client_id, site_id: $('#sf-s').value || null, full_name: $('#sf-n').value.trim() || null, job_title: $('#sf-j').value.trim() || null };
-      closeModal(); await ins('portal_invites', row).catch(() => {}); D.profiles = await fetchAll('profiles'); toast('Added — send them the portal address'); return window.__render();
+      closeModal(); try { await ins('portal_invites', row); } catch (er) { return window.__render(); } D.profiles = await fetchAll('profiles'); window.__render(); await sendInvite(row.id); return;
     }
+    case 'reinvite': return sendInvite(d.id);
     case 'delStaff': if (await confirmBox('Remove this person\'s access? Their past sign-offs are kept.', 'Remove access')) { await del('portal_invites', d.id).catch(() => {}); window.__render(); } return;
   }
 }
