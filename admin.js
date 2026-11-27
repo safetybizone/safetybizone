@@ -6,10 +6,10 @@ import {
 } from './core.js';
 import { assessmentPDF, signOffsPDF, ctlScore, raScore, ctlLabel } from './pdf.js';
 import { photoStrip } from './photos.js';
-import { ccView, ccClick, ccTotals, ccAttention, fhrsChip, fhrsLow, fhrsRefreshStale } from './compliance.js';
+import { ccView, ccClick, ccTotals, ccAttention, fhrsChip, fhrsLow, fhrsRefreshStale, isSuper } from './compliance.js';
 import { svList, svView, svField, svClick, setSvQuery, FORMS } from './services.js';
 
-const S = { me: null, asCo: null, sel: new Set(), ccClient: '', q: '', fClient: '', fStatus: '', af: 'open', draft: null, logs: {}, sigs: {}, hq: '', hcat: '', cq: '', so: {}, tq: '', tsec: '', hzOpen: {}, hzProb: false };
+const S = { me: null, asCo: null, sel: new Set(), ccClient: '', q: '', fClient: '', fStatus: '', af: 'open', draft: null, logs: {}, sigs: {}, hq: '', hcat: '', cq: '', so: {}, tq: '', tsec: '', hzOpen: {}, hzProb: false, sf: null, showStruct: {}, showArch: {}, chPick: null, lePick: null };
 let route = [];
 // Company administrators (client_admin) use this same builder, limited by the database to their own company.
 // A Safetybiz admin can "Open as company" (S.asCo): the builder then shows only that company, as its administrator sees it.
@@ -40,12 +40,15 @@ const sicSectors = (codes) => [...new Set((codes || []).map((c) => (SIC_SECTOR.f
 const CH_STATUS = { active: 'Active', dissolved: 'Dissolved', liquidation: 'In liquidation', receivership: 'In receivership', administration: 'In administration', 'voluntary-arrangement': 'Voluntary arrangement', 'converted-closed': 'Closed', 'insolvency-proceedings': 'Insolvency proceedings', registered: 'Registered', removed: 'Removed', closed: 'Closed', open: 'Open' };
 const chTag = (st) => `<span class="tag ${st === 'active' ? 'ok' : 'bad'}">${esc(CH_STATUS[st] || st || 'Unknown')}</span>`;
 const chLink = (n) => `https://find-and-update.company-information.service.gov.uk/company/${encodeURIComponent(n)}`;
-const chFields = (d) => ({ company_number: d.number, company_status: d.status || null, company_type: d.type || null, incorporated_on: d.incorporated || null, registered_address: d.address || null, sic_codes: d.sic || [], directors: d.directors || [], ch_checked_at: nowIso() });
+const CH_TYPE = { ltd: 'Limited company', plc: 'Limited company', 'private-unlimited': 'Limited company', 'private-limited-guarant-nsc': 'Limited company', 'private-limited-guarant-nsc-limited-exemption': 'Limited company', llp: 'LLP', 'limited-partnership': 'Partnership', 'charitable-incorporated-organisation': 'Charity', 'scottish-charitable-incorporated-organisation': 'Charity' };
+const ETYPES = ['Limited company', 'LLP', 'Sole trader', 'Partnership', 'Charity', 'Other'];
+// A Companies House result as a legal entity row (directors are not kept).
+const chEntity = (d) => ({ name: d.name, entity_type: CH_TYPE[d.type] || 'Other', company_number: d.number, company_status: d.status || null, company_type: d.type || null, incorporated_on: d.incorporated || null, registered_address: d.address || null, sic_codes: d.sic || [], source: 'companies_house', ch_checked_at: nowIso() });
 const chSearchBox = (ctx) => `<div class="chfind"><div class="row" style="flex-wrap:nowrap"><input id="chq-${ctx}" data-chq="${ctx}" placeholder="Company name or number, e.g. ZK Group" autocomplete="off"><button class="btn" data-act="chSearch" data-ctx="${ctx}">Search</button></div><div id="chr-${ctx}"></div></div>`;
-// One company's Companies House details (used on the company page and after picking a result at onboarding).
+// One company's Companies House details (onboarding and the legal entity form).
 const chCard = (d) => `<div class="chcard"><div class="row"><b>${esc(d.name)}</b>${chTag(d.status)}<a class="muted" href="${chLink(d.number)}" target="_blank" rel="noopener">Company ${esc(d.number)} ↗</a></div>
   <div class="g2" style="margin-top:8px"><div><span class="muted">Registered office</span><br>${esc(d.address || '—')}</div><div><span class="muted">Incorporated</span><br>${fd(d.incorporated)}</div>
-  <div><span class="muted">Nature of business (SIC)</span><br>${(d.sic || []).map(esc).join(', ') || '—'}</div><div><span class="muted">Directors</span><br>${(d.directors || []).map((x) => esc(x.name)).join(', ') || '—'}</div></div></div>`;
+  <div><span class="muted">Nature of business (SIC)</span><br>${(d.sic || []).map(esc).join(', ') || '—'}</div><div><span class="muted">Type</span><br>${esc(CH_TYPE[d.type] || d.type || '—')}</div></div></div>`;
 document.addEventListener('keydown', (e) => { const q = e.target.dataset && e.target.dataset.chq; if (q && e.key === 'Enter') { e.preventDefault(); document.querySelector(`[data-act=chSearch][data-ctx="${q}"]`)?.click(); } });
 async function chSearch(ctx, btn) {
   const q = ($(`#chq-${ctx}`)?.value || '').trim(), out = $(`#chr-${ctx}`); if (!out) return;
@@ -58,58 +61,93 @@ async function chSearch(ctx, btn) {
   } catch (e) { out.innerHTML = `<p class="od-t" style="margin:8px 0 0">${esc(e.message)}</p>`; }
   btn.disabled = false;
 }
+// ctx 'ob' = onboarding; 'le' = the legal entity form (S.lePick holds the result until Save).
 async function chPick(ctx, num, btn) {
   const out = $(`#chr-${ctx}`); btn.disabled = true;
   try {
-    const d = await chCall({ action: 'get', number: num }); if (!d) return toast('Company not found', true);
-    const dupe = rows('clients').find((c) => c.company_number === d.number && c.id !== ctx);
-    if (dupe) { toast(`${dupe.name} is already set up with company number ${d.number}`, true); if (ctx !== 'ob') { btn.disabled = false; return; } }
+    const d = await chCall({ action: 'get', number: num }); if (!d) { btn.disabled = false; return toast('Company not found', true); }
     if (ctx === 'ob') {
+      const other = rows('legal_entities').find((e) => e.company_number === d.number);
+      if (other) toast(`Note: ${cName(other.client_id)} already uses company ${d.number}`, true);
       S.chPick = d;
-      $('#ob-name').value = d.name; $('#ob-addr').value = d.address || $('#ob-addr').value;
-      if (!$('#ob-cn').value.trim() && d.directors[0]) $('#ob-cn').value = d.directors[0].name;
+      if (!$('#ob-name').value.trim()) $('#ob-name').value = d.name;
       const sug = sicSectors(d.sic); document.querySelectorAll('#ob-sec input').forEach((i) => { if (sug.includes(i.value)) i.checked = true; });
-      out.innerHTML = chCard(d) + `<p class="hint">Filled in from Companies House${sug.length ? `; sectors suggested from the SIC codes: <b>${sug.map(esc).join(', ')}</b>` : ''}. Check them below.</p>`;
-      if (d.status !== 'active') toast(`Companies House shows this company as ${(CH_STATUS[d.status] || d.status).toLowerCase()}`, true);
+      $('#ob-et').value = '';
+      out.innerHTML = chCard(d) + `<p class="hint">Saved as the organisation's legal entity${sug.length ? `; sectors suggested from the SIC codes: <b>${sug.map(esc).join(', ')}</b>` : ''}.</p>`;
     } else {
-      const c = byId('clients', ctx), patch = chFields(d);
-      if (!c.address && d.address) patch.address = d.address;
-      if (!c.contact_name && d.directors[0]) patch.contact_name = d.directors[0].name;
-      if (!(c.sectors || []).length && sicSectors(d.sic).length) patch.sectors = sicSectors(d.sic);
-      await upd('clients', c.id, patch); toast('Linked to Companies House'); window.__render();
+      const cid = $('#le-c').value, dupe = rows('legal_entities').find((e) => e.client_id === cid && e.company_number === d.number && e.id !== $('#le-id').value);
+      if (dupe) { btn.disabled = false; return toast(`This organisation already has ${dupe.name} (company ${d.number})`, true); }
+      S.lePick = d; $('#le-n').value = d.name; $('#le-t').value = CH_TYPE[d.type] || 'Other'; $('#le-no').value = d.number; $('#le-a').value = d.address || '';
+      out.innerHTML = chCard(d);
     }
+    if (d.status !== 'active') toast(`Companies House shows this company as ${(CH_STATUS[d.status] || d.status).toLowerCase()}`, true);
   } catch (e) { toast(e.message, true); }
   btn.disabled = false;
 }
-function chPanel(c) {
-  const linked = !!c.company_number;
-  const d = { name: c.name, number: c.company_number, status: c.company_status, address: c.registered_address, incorporated: c.incorporated_on, sic: c.sic_codes, directors: c.directors };
-  return `<div class="panel"><div class="sect" style="margin-bottom:10px"><div><h3>Companies House</h3>${linked ? `<p class="hint" style="margin-top:2px">Checked ${ft(c.ch_checked_at)}</p>` : ''}</div>${linked && !CO() ? `<div class="row"><button class="btn sm" data-act="chRefresh" data-id="${c.id}">Refresh</button><button class="btn sm ghost" data-act="chUnlink" data-id="${c.id}">Unlink</button></div>` : ''}</div>
-  ${linked ? chCard(d) : CO() ? '<p class="muted" style="margin:0">Not linked yet. Safetybiz links the company to its Companies House record.</p>' : `<p class="hint" style="margin:0 0 8px">Find the company to bring in its registered office, company number, nature of business and directors.</p>${chSearchBox(c.id)}`}</div>`;
-}
 
+// ---------- legal entities (per organisation, reusable across its sites) ----------
+const entities = (cid) => rows('legal_entities').filter((e) => e.client_id === cid).sort((a, b) => a.name.localeCompare(b.name));
+const entSites = (eid) => rows('sites').filter((x) => x.legal_entity_id === eid);
+const entName = (id) => byId('legal_entities', id)?.name || '';
+const entLine = (e) => `${esc(e.entity_type)}${e.company_number ? ' · ' + esc(e.company_number) : ''}`;
+function entityPanel(cid) {
+  const list = entities(cid);
+  return `<div class="panel"><div class="sect"><div><h3>Legal entities</h3><p class="hint">The registered companies or sole traders the sites trade under. One entity can cover many sites; a group can have several.</p></div><button class="btn sm" data-act="leAdd" data-c="${cid}">+ Add legal entity</button></div>
+  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Legal entity</th><th>Company number</th><th>Registered office</th><th>Sites</th><th></th></tr></thead><tbody>${list.map((e) => `<tr><td data-l="Legal entity"><b>${esc(e.name)}</b><br><span class="muted">${esc(e.entity_type)}</span></td>
+  <td data-l="Company number">${e.company_number ? `<a href="${chLink(e.company_number)}" target="_blank" rel="noopener">${esc(e.company_number)} ↗</a> ${e.company_status ? chTag(e.company_status) : ''}${e.ch_checked_at ? `<br><span class="muted">Checked ${fd(e.ch_checked_at)}</span>` : ''}` : '<span class="muted">Not registered</span>'}</td>
+  <td data-l="Registered office">${esc(e.registered_address || '—')}</td><td data-l="Sites">${entSites(e.id).length}</td>
+  <td><div class="row" style="flex-wrap:nowrap">${e.source === 'companies_house' ? `<button class="btn sm" data-act="leRefresh" data-id="${e.id}">Refresh</button>` : ''}<button class="btn sm" data-act="leEdit" data-id="${e.id}">Edit</button>${entSites(e.id).length ? '' : `<button class="btn sm ghost" data-act="leDel" data-id="${e.id}" aria-label="Remove">✕</button>`}</div></td></tr>`).join('')}</tbody></table></div>`
+    : '<p class="muted" style="margin:0">None yet. Add the company from Companies House, or enter a sole trader or partnership by hand.</p>'}</div>`;
+}
+function leModal(cid, id, fromSite) {
+  const e = id ? byId('legal_entities', id) : null, ch = e?.source === 'companies_house';
+  S.lePick = null;
+  openModal(`<h3>${e ? 'Edit legal entity' : 'Add a legal entity'}</h3><input type="hidden" id="le-c" value="${cid}"><input type="hidden" id="le-id" value="${e?.id || ''}"><input type="hidden" id="le-fs" value="${fromSite ? '1' : ''}">
+  ${e ? '' : `<h4 style="margin:0 0 6px">Find on Companies House</h4>${chSearchBox('le')}<p class="hint">Not on Companies House (a sole trader or partnership)? Fill in the details below instead.</p>`}
+  <div class="g2" style="margin-top:10px"><label class="full">Registered name<input id="le-n" value="${esc(e?.name || '')}"${ch ? ' disabled' : ''}></label>
+  <label>Type<select id="le-t"${ch ? ' disabled' : ''}>${ETYPES.map((t) => `<option${t === (e?.entity_type || 'Sole trader') ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
+  <label>Company number<input id="le-no" value="${esc(e?.company_number || '')}" placeholder="Leave blank if not registered"${ch ? ' disabled' : ''}></label>
+  <label class="full">Registered or business address<textarea id="le-a" style="min-height:60px"${ch ? ' disabled' : ''}>${esc(e?.registered_address || '')}</textarea></label></div>
+  ${ch ? '<p class="hint">These details come from Companies House. Use Refresh to update them.</p>' : ''}
+  <div class="ft"><button class="btn" data-act="close">Cancel</button>${ch ? '' : `<button class="btn pri" data-act="leSave">${e ? 'Save' : 'Add legal entity'}</button>`}</div>`);
+}
+async function leSave() {
+  const cid = $('#le-c').value, id = $('#le-id').value, fromSite = !!$('#le-fs').value, pick = S.lePick;
+  const row = pick ? chEntity(pick) : { name: $('#le-n').value.trim(), entity_type: $('#le-t').value, company_number: $('#le-no').value.trim().toUpperCase() || null, registered_address: $('#le-a').value.trim() || null, source: 'manual' };
+  if (!row.name) return toast('Enter the registered name', true);
+  if (row.company_number && !/^[A-Z0-9]{8}$/.test(row.company_number)) return toast('A company number has 8 characters, e.g. 01234567', true);
+  if (row.company_number && rows('legal_entities').some((e) => e.client_id === cid && e.company_number === row.company_number && e.id !== id)) return toast('This organisation already has that company number', true);
+  closeModal();
+  try {
+    if (id) await upd('legal_entities', id, row);
+    else { row.client_id = cid; await ins('legal_entities', row); if (fromSite && S.sf) S.sf.legal_entity_id = row.id; }
+    toast(id ? 'Saved' : 'Legal entity added');
+  } catch (e) { /* shown */ }
+  window.__render();
+}
 // ---------- load ----------
 export async function loadAdmin(me) {
   S.me = me; window.__me = me;
   const ackCols = 'id,assessment_id,version,user_id,email,full_name,job_title,method,site_id,statement,acknowledged_at';
-  const [clients, sites, invites, profiles, hreg, creg, hrc, ras, hz, ctl, acts, audits, pubs, acks, topics, thz, tct, cdt, sdocs, fhist, units, svjobs] = await Promise.all([
+  const [clients, sites, invites, profiles, hreg, creg, hrc, ras, hz, ctl, acts, audits, pubs, acks, topics, thz, tct, cdt, sdocs, fhist, units, svjobs, ents, sbrands] = await Promise.all([
     fetchAll('clients'), fetchAll('sites'), fetchAll('portal_invites'), fetchAll('profiles'), fetchAll('hazard_register'), fetchAll('control_register'),
     fetchAll('hazard_register_controls'), fetchAll('assessments'), fetchAll('assessment_hazards'), fetchAll('assessment_controls'), fetchAll('actions'),
     fetchAll('audits'), fetchAll('published_assessments', 'id,assessment_id,client_id,site_id,version,note,published_at,published_by'), fetchAll('acknowledgements', ackCols),
     fetchAll('topic_library'), fetchAll('topic_hazards'), fetchAll('topic_controls'), fetchAll('compliance_doc_types'), fetchAll('site_documents'),
-    fetchAll('site_fhrs_history'), fetchAll('org_units'), fetchAll('service_jobs'),
+    fetchAll('site_fhrs_history'), fetchAll('org_units'), fetchAll('service_jobs'), fetchAll('legal_entities'), fetchAll('site_brands'),
   ]);
   Object.assign(D, { clients, sites, portal_invites: invites, profiles, hazard_register: hreg, control_register: creg, hazard_register_controls: hrc, assessments: ras,
-    assessment_hazards: hz, assessment_controls: ctl, actions: acts, audits, published_assessments: pubs, acknowledgements: acks, topic_library: topics, topic_hazards: thz, topic_controls: tct, compliance_doc_types: cdt, site_documents: sdocs, site_fhrs_history: fhist, org_units: units, service_jobs: svjobs });
+    assessment_hazards: hz, assessment_controls: ctl, actions: acts, audits, published_assessments: pubs, acknowledgements: acks, topic_library: topics, topic_hazards: thz, topic_controls: tct, compliance_doc_types: cdt, site_documents: sdocs, site_fhrs_history: fhist, org_units: units, service_jobs: svjobs, legal_entities: ents, site_brands: sbrands });
   if (S.asCo) viewAs(S.asCo);
 }
 // Keep only one company's records in memory (Open as company).
 function viewAs(cid) {
   const raIds = new Set(rows('assessments').filter((a) => a.client_id === cid).map((a) => a.id));
-  const byClient = ['clients', 'sites', 'org_units', 'portal_invites', 'assessments', 'published_assessments', 'site_documents', 'site_fhrs_history', 'service_jobs'];
+  const byClient = ['clients', 'sites', 'org_units', 'legal_entities', 'portal_invites', 'assessments', 'published_assessments', 'site_documents', 'site_fhrs_history', 'service_jobs'];
   byClient.forEach((t) => (D[t] = rows(t).filter((r) => (t === 'clients' ? r.id : r.client_id) === cid)));
   ['assessment_hazards', 'assessment_controls', 'actions', 'audits', 'acknowledgements'].forEach((t) => (D[t] = rows(t).filter((r) => raIds.has(r.assessment_id) || (t === 'actions' && r.site_id && byId('sites', r.site_id)))));
   D.service_jobs = rows('service_jobs').filter((j) => j.status === 'Issued');
+  const sids = new Set(rows('sites').map((x) => x.id)); D.site_brands = rows('site_brands').filter((x) => sids.has(x.site_id));
   const secs = byId('clients', cid)?.sectors || [];
   D.topic_library = rows('topic_library').filter((t) => t.active && (t.sector === 'General' || secs.includes(t.sector)));
   D.profiles = rows('profiles').filter((p) => p.client_id === cid || p.id === S.me.id);
@@ -147,22 +185,32 @@ const units = (cid) => rows('org_units').filter((u) => u.client_id === cid);
 const kids = (uid, cid) => units(cid).filter((u) => (u.parent_id || null) === (uid || null)).sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name));
 function unitTree(cid) { const out = []; const walk = (pid, d) => kids(pid, cid).forEach((u) => { out.push([u, d]); walk(u.id, d + 1); }); walk(null, 0); return out; }
 const unitDesc = (uid) => { const ids = new Set([uid]); let grew = true; while (grew) { grew = false; rows('org_units').forEach((u) => { if (u.parent_id && ids.has(u.parent_id) && !ids.has(u.id)) { ids.add(u.id); grew = true; } }); } return ids; };
-const unitSites = (uid) => { const ids = unitDesc(uid); return rows('sites').filter((s) => s.unit_id && ids.has(s.unit_id)); };
+// A brand covers the sites carrying it; a region covers its sites and those of its areas.
+const siteBrands = (sid) => rows('site_brands').filter((x) => x.site_id === sid).map((x) => x.brand_id);
+const unitSites = (uid) => { const ids = unitDesc(uid); return rows('sites').filter((s) => ids.has(s.region_id) || siteBrands(s.id).some((b) => ids.has(b))); };
+const isOpen = (s) => (s.status || 'Open') !== 'Archived';
+const liveSites = (cid) => clientSites(cid).filter(isOpen);
+const brandsOf = (cid) => units(cid).filter((u) => u.kind === 'brand').sort((a, b) => a.name.localeCompare(b.name));
+const uName = (id) => byId('org_units', id)?.name || '';
+const regionOpts = (cid) => [['', 'No region']].concat(unitTree(cid).filter(([u]) => u.kind !== 'brand').map(([u, d]) => [u.id, '  '.repeat(d) + (u.name || 'Untitled') + (u.kind === 'area' ? ' (area)' : '')]));
 const unitPath = (uid) => { const p = []; let u = byId('org_units', uid); while (u) { p.unshift(u.name || KIND[u.kind]); u = byId('org_units', u.parent_id); } return p.join(' › '); };
-const unitOpts = (cid, blank = 'Not grouped') => [['', blank]].concat(unitTree(cid).map(([u, d]) => [u.id, '  '.repeat(d) + (u.name || 'Untitled') + ' (' + KIND[u.kind].toLowerCase() + ')']));
+const unitOpts = (cid, blank = 'Not grouped') => [['', blank]].concat(unitTree(cid).map(([u, d]) => [u.id, '  '.repeat(d) + (u.name || 'Untitled') + ' (' + KIND[u.kind].toLowerCase() + ')']));
 const mgrLabel = (i) => { const u = byId('org_units', i.unit_id); return u ? `${MGR_TITLE[u.kind]} · ${u.name}` : 'Manager'; };
 // Where an assessment lives: a site, or a brand (master).
-const raWhere = (a) => (a.is_master ? `Brand master · ${byId('org_units', a.unit_id)?.name || 'brand'}` : sName(a.site_id));
+const raWhere = (a) => (a.is_master ? (a.unit_id ? `Brand master · ${byId('org_units', a.unit_id)?.name || 'brand'}` : 'Organisation master') : sName(a.site_id));
 const copiesOf = (mid) => rows('assessments').filter((x) => x.master_id === mid);
+// Brands and regions are optional and independent: a site can carry a brand, a region, both or neither.
 function structurePanel(cid) {
-  const tree = unitTree(cid), mgrs = rows('portal_invites').filter((i) => i.client_id === cid && i.role === 'manager');
-  return `<div class="panel"><div class="sect"><div><h3>Brands, regions and areas</h3><p class="hint">Group the sites so regional and area managers see only the shops under them. Any level can be skipped.</p></div>
-  <div class="row"><button class="btn sm" data-act="unitAdd" data-c="${cid}" data-k="brand">+ Brand</button><button class="btn sm" data-act="unitAdd" data-c="${cid}" data-k="region">+ Region</button><button class="btn sm" data-act="unitAdd" data-c="${cid}" data-k="area">+ Area</button></div></div>
-  ${tree.length ? `<div class="tree">${tree.map(([u, d]) => { const n = unitSites(u.id).length, m = mgrs.filter((i) => unitDesc(u.id).has(i.unit_id) && i.unit_id === u.id);
+  const all = units(cid), mgrs = rows('portal_invites').filter((i) => i.client_id === cid && i.role === 'manager');
+  if (!all.length && !S.showStruct[cid]) return `<div class="panel"><div class="sect" style="margin:0"><div><h3>Brands and regions</h3><p class="hint">Optional. Only needed for more than one brand, or for regional and area managers.</p></div><button class="btn sm" data-act="structShow" data-c="${cid}">Set up brands or regions</button></div></div>`;
+  const row = (u, d) => { const n = unitSites(u.id).filter(isOpen).length, m = mgrs.filter((i) => i.unit_id === u.id);
     return `<div class="tn" style="margin-left:${d * 26}px"><span class="tag k-${u.kind}">${KIND[u.kind]}</span><input id="u-${u.id}-n" data-b="org_units|${u.id}|name" value="${esc(u.name)}" aria-label="${KIND[u.kind]} name">
     <span class="muted">${n} site${n === 1 ? '' : 's'}${m.length ? ' · ' + m.map((i) => esc(i.full_name || i.email)).join(', ') : ''}</span>
-    <div class="row sp" style="flex-wrap:nowrap">${u.kind === 'brand' ? `<button class="btn sm ghost" data-act="unitAdd" data-c="${cid}" data-k="region" data-p="${u.id}">+ Region</button>` : ''}${u.kind !== 'area' ? `<button class="btn sm ghost" data-act="unitAdd" data-c="${cid}" data-k="area" data-p="${u.id}">+ Area</button>` : ''}<button class="btn sm ghost" data-act="unitDel" data-id="${u.id}" aria-label="Remove">✕</button></div></div>`; }).join('')}</div>`
-    : '<p class="muted" style="margin:0">No structure yet. Start with a brand, or a region if the company has only one brand.</p>'}</div>`;
+    <div class="row sp" style="flex-wrap:nowrap">${u.kind === 'region' ? `<button class="btn sm ghost" data-act="unitAdd" data-c="${cid}" data-k="area" data-p="${u.id}">+ Area</button>` : ''}<button class="btn sm ghost" data-act="unitDel" data-id="${u.id}" aria-label="Remove">✕</button></div></div>`; };
+  const brands = unitTree(cid).filter(([u]) => u.kind === 'brand'), regs = unitTree(cid).filter(([u]) => u.kind !== 'brand');
+  return `<div class="panel"><div class="sect"><div><h3>Brands and regions</h3><p class="hint">Both optional and independent. A regional manager sees every brand's sites in their region; a brand manager sees the brand's sites in every region.</p></div></div>
+  <div class="g2"><div><div class="row" style="margin-bottom:8px"><b>Brands</b><button class="btn sm sp" data-act="unitAdd" data-c="${cid}" data-k="brand">+ Brand</button></div><div class="tree">${brands.map(([u, d]) => row(u, d)).join('') || '<p class="muted" style="margin:0">No brands.</p>'}</div></div>
+  <div><div class="row" style="margin-bottom:8px"><b>Regions and areas</b><button class="btn sm sp" data-act="unitAdd" data-c="${cid}" data-k="region">+ Region</button></div><div class="tree">${regs.map(([u, d]) => row(u, d)).join('') || '<p class="muted" style="margin:0">No regions.</p>'}</div></div></div></div>`;
 }
 
 // people who can see an assessment in the portal
@@ -174,12 +222,13 @@ function audienceFor(a) {
 export function adminView(r) {
   route = r;
   const [p0, p1, p2] = r;
+  if (p0 !== 'site') S.sf = null;
   const open = rows('actions').filter((x) => x.status !== 'Done').length;
   const nav = [
     { k: 'dash', href: '', icon: 'dash', label: 'Dashboard' },
-    { k: 'clients', href: 'clients', icon: 'clients', label: 'Clients and sites', c: rows('clients').length },
+    { k: 'clients', href: 'clients', icon: 'clients', label: 'Organisations', c: rows('clients').length },
     { k: 'ras', href: 'ras', icon: 'ra', label: 'Risk assessments', c: live().length },
-    { k: 'compliance', href: 'compliance', icon: 'cert', label: 'Compliance centre', c: (() => { const t = ccTotals(rows('sites').map((x) => x.id)); return t.Expired + t['Due soon'] || ''; })() },
+    { k: 'compliance', href: 'compliance', icon: 'cert', label: 'Compliance centre', c: (() => { const t = ccTotals(rows('sites').filter(isOpen).map((x) => x.id)); return t.Expired + t['Due soon'] || ''; })() },
     { k: 'services', href: 'services', icon: 'svc', label: 'Service jobs', c: rows('service_jobs').filter((j) => j.status === 'Draft').length || '' },
     { k: 'topics', href: 'topics', icon: 'lib', label: 'Topic library', c: rows('topic_library').filter((t) => t.active).length },
     { k: 'hazards', href: 'hazards', icon: 'hz', label: 'Hazard register' },
@@ -195,13 +244,16 @@ export function adminView(r) {
   }
   let active = 'dash', title = 'Dashboard', body;
   if (CO() && ['clients', 'hazards', 'controls', 'team'].includes(p0)) { active = 'clients'; title = 'Sites and staff'; body = vClient(myCo()); }
-  else if (p0 === 'clients') { active = 'clients'; title = 'Clients and sites'; body = vClients(); }
-  else if (p0 === 'client') { active = 'clients'; title = 'Client'; body = vClient(p1); }
+  else if (p0 === 'clients') { active = 'clients'; title = 'Organisations'; body = vClients(); }
+  else if (p0 === 'client') { active = 'clients'; title = 'Organisation'; body = vClient(p1); }
+  else if (p0 === 'site') { active = 'clients'; title = 'Site'; body = vSite(p1, p2); }
   else if (p0 === 'ras') { active = 'ras'; title = 'Risk assessments'; body = vRAs(); }
   else if (p0 === 'ra') { active = 'ras'; title = 'Risk assessment'; body = vRA(p1, p2 || 'details'); }
-  else if (p0 === 'compliance') { active = 'compliance'; title = 'Compliance centre'; body = ccView(r, CO() ? { admin: false, base: 'compliance' } : { admin: true, base: 'compliance', clientName: cName, clientFilter: S.ccClient }); }
+  else if (p0 === 'compliance') { active = 'compliance'; title = 'Compliance centre'; body = ccView(r, CO() ? { admin: false, base: 'compliance', siteDetails: true } : { admin: true, base: 'compliance', clientName: cName, clientFilter: S.ccClient, siteDetails: true }); }
   else if (p0 === 'services' && !CO()) { active = 'services'; title = 'Service jobs'; body = svList(); }
-  else if (p0 === 'service') { active = CO() ? 'compliance' : 'services'; title = 'Service job'; body = svView(p1); }
+  else if (p0 === 'service') { active = CO() ? 'compliance' : 'services'; title = 'Service job'; body = svView(p1);
+    // Superadmin only: delete an issued certificate (with a reason; see compliance.js). The button sits beside "Certificate PDF".
+    if (isSuper() && byId('service_jobs', p1)?.status === 'Issued') body = body.replace('>Certificate PDF</button>', `>Certificate PDF</button><button class="btn sm dng" data-act="ccDel" data-kind="job" data-id="${p1}">Delete certificate</button>`); }
   else if (p0 === 'topics') { active = 'topics'; title = 'Topic library'; body = vTopics(); }
   else if (p0 === 'hazards') { active = 'hazards'; title = 'Hazard register'; body = vHazReg(); }
   else if (p0 === 'controls') { active = 'controls'; title = 'Control register'; body = vCtlReg(); }
@@ -219,10 +271,10 @@ function vDash() {
   const soon = addDays(today(), 30), month = addDays(today(), -30);
   const od = acts.filter(isOd), due = L.filter((a) => a.review_date && a.review_date <= soon).sort((a, b) => a.review_date.localeCompare(b.review_date));
   const hi = [...L].filter((a) => scoreOf(a, 'res') || scoreOf(a, 'init')).sort((a, b) => (scoreOf(b, 'res') || scoreOf(b, 'init')) - (scoreOf(a, 'res') || scoreOf(a, 'init'))).slice(0, 6);
-  const cc = ccTotals(rows('sites').map((x) => x.id)), ccAtt = ccAttention(rows('sites').map((x) => x.id), 4), lowF = fhrsLow(rows('sites').map((x) => x.id));
-  fhrsRefreshStale(rows('sites'));
+  const openIds = rows('sites').filter(isOpen).map((x) => x.id), cc = ccTotals(openIds), ccAtt = ccAttention(openIds, 4), lowF = fhrsLow(openIds);
+  fhrsRefreshStale(rows('sites').filter(isOpen));
   const recent = [...rows('acknowledgements')].sort((a, b) => b.acknowledged_at.localeCompare(a.acknowledged_at)).slice(0, 6);
-  const st = [CO() ? [rows('sites').length, 'Sites'] : [rows('clients').length, 'Clients'], [L.length, 'Live risk assessments'], [L.filter((a) => scoreOf(a, 'res') >= 10).length, 'High risk with controls', 1],
+  const st = [CO() ? [openIds.length, 'Sites'] : [rows('clients').length, 'Organisations'], [L.length, 'Live risk assessments'], [L.filter((a) => scoreOf(a, 'res') >= 10).length, 'High risk with controls', 1],
     [acts.filter((x) => x.status !== 'Done').length, 'Open actions'], [od.length, 'Overdue actions', 1], [due.length, 'Renewals due in 30 days', 1],
     [rows('acknowledgements').filter((a) => a.acknowledged_at >= month).length, 'Sign-offs in last 30 days'], [cc.Expired, 'Certificates expired', 1], [cc['Due soon'], 'Certificates due in 30 days', 1], [lowF.length, 'Food hygiene 2 or below', 1]];
   const st1 = `<div class="stats">${st.map(([n, l, al]) => `<div class="stat${al && n ? ' alert' : ''}"><span>${l}</span><b>${n}</b></div>`).join('')}</div>`;
@@ -238,74 +290,133 @@ function vDash() {
   <div class="panel"><div class="sect"><h3>Latest sign-offs</h3><a class="btn sm" href="#/signoffs">All sign-offs</a></div>${recent.length ? recent.map((k) => { const a = byId('assessments', k.assessment_id); return `<a class="li" href="#/ra/${k.assessment_id}/publish"><span class="tag ok">Signed</span><span><b>${esc(k.full_name)}</b>${k.job_title ? ', ' + esc(k.job_title) : ''}<br><span class="muted">${esc(a?.title || '')} v${k.version} · ${esc(cName(a?.client_id))} · ${ft(k.acknowledged_at)}${k.method === 'In person' ? ' · in person' : ''}</span></span></a>`; }).join('') : '<p class="muted">No sign-offs yet. Publish an assessment and invite the client\'s staff.</p>'}</div></div>`;
 }
 
-// ---------- clients ----------
+// ---------- organisations ----------
 function vClients() {
   const cs = [...rows('clients')].sort((a, b) => a.name.localeCompare(b.name));
-  return `<div class="page"><div class="sect"><h2>Clients</h2><button class="btn pri" data-act="onboard">+ Onboard client</button></div>
-  ${cs.length ? `<div class="tw"><table class="stack"><thead><tr><th>Client</th><th>Head office</th><th>Sites</th><th>Risk assessments</th><th>Portal users</th><th>Open actions</th></tr></thead><tbody>${cs.map((c) => {
-    const ras = rows('assessments').filter((a) => a.client_id === c.id), ho = clientSites(c.id).find((s) => s.is_head_office);
-    return `<tr class="click" data-go="client/${c.id}"><td data-l="Client"><b>${esc(c.name)}</b><br><span class="muted">${esc(c.contact_name || '')}</span></td><td data-l="Head office">${esc(ho?.address || c.address || '—')}</td><td data-l="Sites">${clientSites(c.id).length}</td><td data-l="Risk assessments">${ras.length}</td><td data-l="Portal users">${rows('portal_invites').filter((i) => i.client_id === c.id).length}</td><td data-l="Open actions">${rows('actions').filter((x) => x.status !== 'Done' && ras.some((a) => a.id === x.assessment_id)).length}</td></tr>`;
-  }).join('')}</tbody></table></div>` : empty('No clients yet', 'Onboard a client with their head office, sites and a manager for the portal.', '<button class="btn pri" data-act="onboard">+ Onboard client</button>')}</div>`;
+  return `<div class="page"><div class="sect"><h2>Organisations</h2><button class="btn pri" data-act="onboard">+ Add organisation</button></div>
+  ${cs.length ? `<div class="tw"><table class="stack"><thead><tr><th>Organisation</th><th>Sites</th><th>Legal entities</th><th>Risk assessments</th><th>Portal users</th><th>Open actions</th></tr></thead><tbody>${cs.map((c) => {
+    const ras = rows('assessments').filter((a) => a.client_id === c.id);
+    return `<tr class="click" data-go="client/${c.id}"><td data-l="Organisation"><b>${esc(c.name)}</b><br><span class="muted">${esc(c.contact_name || '')}</span></td><td data-l="Sites">${liveSites(c.id).length}</td><td data-l="Legal entities">${entities(c.id).map((e) => esc(e.name)).join(', ') || '—'}</td><td data-l="Risk assessments">${ras.length}</td><td data-l="Portal users">${rows('portal_invites').filter((i) => i.client_id === c.id).length}</td><td data-l="Open actions">${rows('actions').filter((x) => x.status !== 'Done' && actClient(x) === c.id).length}</td></tr>`;
+  }).join('')}</tbody></table></div>` : empty('No organisations yet', 'Add an organisation with its legal entity, sites and company administrator.', '<button class="btn pri" data-act="onboard">+ Add organisation</button>')}</div>`;
 }
 
 function onboardModal() {
   S.chPick = null;
-  openModal(`<h3>Onboard a client</h3><h4 style="margin:0 0 6px">Find on Companies House</h4>${chSearchBox('ob')}<div class="g2" style="margin-top:14px">
-  <label class="full">Company name<input id="ob-name" placeholder="e.g. Harbourside Joinery Ltd"></label>
-  <label class="full">Head office address<textarea id="ob-addr" style="min-height:60px"></textarea></label>
-  <label>Contact name<input id="ob-cn"></label><label>Contact email<input id="ob-ce" type="email"></label><label>Phone<input id="ob-ph"></label></div>
+  openModal(`<h3>Add an organisation</h3><h4 style="margin:0 0 6px">Legal entity — find on Companies House</h4>${chSearchBox('ob')}
+  <label style="margin-top:8px">Not on Companies House?<select id="ob-et"><option value="">Search above, or add the legal entity later</option>${ETYPES.filter((t) => t !== 'Limited company' && t !== 'LLP').map((t) => `<option>${t}</option>`).join('')}</select></label>
+  <div class="g2" style="margin-top:14px"><label class="full">Organisation name<input id="ob-name" placeholder="e.g. Harbourside Joinery"></label>
+  <label>Main contact<input id="ob-cn"></label><label>Contact email<input id="ob-ce" type="email"></label><label>Phone<input id="ob-ph"></label>
+  <label class="full">Correspondence address (optional — not a site)<textarea id="ob-addr" style="min-height:52px"></textarea></label></div>
   <h4 style="margin:18px 0 6px">Sectors</h4><p class="hint" style="margin:0 0 6px">The company administrator sees the topic library topics for these sectors, plus General topics.</p>
   <div class="row" id="ob-sec">${SECTORS().map((x) => `<label class="chk" style="border:1px solid var(--line);border-radius:20px;padding:5px 11px"><input type="checkbox" value="${esc(x)}"> ${esc(x)}</label>`).join('')}</div>
-  <h4 style="margin:18px 0 6px">Other sites</h4><p class="hint" style="margin:0 0 6px">A Head office site is added automatically. One site per line: <b>Site name — address</b></p>
-  <textarea id="ob-sites" placeholder="Warehouse — Unit 4, Quay Road&#10;Shop — 12 High Street"></textarea>
-  <h4 style="margin:18px 0 6px">Company administrator (required)</h4><p class="hint" style="margin:0 0 6px">Linked to this company only. They add the company's other administrators, regional and area managers and staff, build and publish its risk assessments, and keep the sign-off records and certificates.</p>
+  <h4 style="margin:18px 0 6px">Sites (optional)</h4><p class="hint" style="margin:0 0 6px">The physical premises to manage. One per line: <b>Site name — address</b>. Add more later. No head office is created; add it here if it is a workplace.</p>
+  <textarea id="ob-sites" placeholder="Crawley — 12 High Street, Crawley&#10;Central kitchen — Unit 4, Quay Road"></textarea>
+  <h4 style="margin:18px 0 6px">Company administrator (required)</h4><p class="hint" style="margin:0 0 6px">Linked to this organisation only. They add its other administrators, regional and area managers and staff.</p>
   <div class="g3"><label>Name<input id="ob-mn"></label><label>Email<input id="ob-me" type="email"></label><label>Job title<input id="ob-mj"></label></div>
-  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="onboardSave">Onboard client</button></div>`, true);
+  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="onboardSave">Add organisation</button></div>`, true);
 }
 async function onboardSave() {
-  const name = $('#ob-name').value.trim(); if (!name) return toast('Enter the company name', true);
+  const name = $('#ob-name').value.trim(); if (!name) return toast('Enter the organisation name', true);
   const sectors = [...document.querySelectorAll('#ob-sec input:checked')].map((i) => i.value);
-  const ch = S.chPick && S.chPick.name ? chFields(S.chPick) : {};
-  const c = { id: uid(), name, sectors, ...ch, address: $('#ob-addr').value.trim() || null, contact_name: $('#ob-cn').value.trim() || null, contact_email: $('#ob-ce').value.trim() || null, phone: $('#ob-ph').value.trim() || null };
-  const siteLines = $('#ob-sites').value || '';
   const mn = $('#ob-mn').value.trim(), me = $('#ob-me').value.trim().toLowerCase(), mj = $('#ob-mj').value.trim();
   if (!mn || !me) return toast('Enter the company administrator\'s name and email', true);
   if (!/^\S+@\S+\.\S+$/.test(me)) return toast('Enter a valid email for the company administrator', true);
   if (!sectors.length) return toast('Choose at least one sector', true);
+  const c = { id: uid(), name, sectors, address: $('#ob-addr').value.trim() || null, contact_name: $('#ob-cn').value.trim() || null, contact_email: $('#ob-ce').value.trim() || null, phone: $('#ob-ph').value.trim() || null };
+  const et = $('#ob-et').value, ent = S.chPick ? chEntity(S.chPick) : et ? { name, entity_type: et, source: 'manual' } : null;
+  const siteLines = ($('#ob-sites').value || '').split('\n').map((x) => x.trim()).filter(Boolean);
   closeModal();
   try {
     await ins('clients', c);
-    D.sites = rows('sites').concat(await fetchAll('sites', '*', (q) => q.eq('client_id', c.id)));
-    for (const ln of siteLines.split('\n').map((s) => s.trim()).filter(Boolean)) { const [n, ...ad] = ln.split(/\s+[—–-]\s+/); await ins('sites', { client_id: c.id, name: n.trim(), address: ad.join(' - ').trim() || null }); }
+    if (ent) { ent.client_id = c.id; await ins('legal_entities', ent); }
+    for (const ln of siteLines) { const [n, ...ad] = ln.split(/\s+[—–-]\s+/); await ins('sites', { client_id: c.id, name: n.trim(), address: ad.join(' - ').trim() || null, legal_entity_id: ent ? ent.id : null }); }
+    if (siteLines.length) D.sites = rows('sites').filter((x) => x.client_id !== c.id).concat(await fetchAll('sites', '*', (q) => q.eq('client_id', c.id)));
     await ins('portal_invites', { email: me, role: 'client_admin', client_id: c.id, full_name: mn || null, job_title: mj || null });
-    toast('Client onboarded'); location.hash = '#/client/' + c.id;
+    toast('Organisation added'); location.hash = '#/client/' + c.id;
   } catch (e) { /* toast already shown */ }
 }
 
+const ST_TAG = { Open: '', 'Temporarily closed': 'warn', Archived: 'bad' };
+const siteStatus = (s) => { const v = s.status || 'Open'; return v === 'Open' ? '' : `<span class="tag ${ST_TAG[v]}">${esc(v)}</span>`; };
+function sitesPanel(cid) {
+  const all = clientSites(cid), arch = all.filter((x) => !isOpen(x)), list = S.showArch[cid] ? all : all.filter(isOpen), grp = units(cid).length;
+  return `<div class="panel"><div class="sect"><div><h3>Sites</h3><p class="hint">The physical premises. Certificates, risk assessments and actions belong to a site.</p></div><div class="row">${arch.length ? `<button class="btn sm ghost" data-act="archTog" data-c="${cid}">${S.showArch[cid] ? 'Hide' : 'Show'} ${arch.length} archived</button>` : ''}<a class="btn sm pri" href="#/site/new/${cid}">+ Add site</a></div></div>
+  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Address</th><th>Legal entity</th>${grp ? '<th>Brands</th><th>Region</th>' : ''}<th>Food hygiene</th><th></th></tr></thead><tbody>${list.map((x) => `<tr class="click" data-go="site/${x.id}"><td data-l="Site"><b>${esc(x.name)}</b> ${siteStatus(x)}${x.trading_name ? `<br><span class="muted">Trading as ${esc(x.trading_name)}</span>` : ''}</td><td data-l="Address">${esc(x.address || '—')}</td><td data-l="Legal entity">${esc(entName(x.legal_entity_id) || '—')}</td>${grp ? `<td data-l="Brands">${siteBrands(x.id).map((b) => `<span class="tag k-brand">${esc(uName(b))}</span>`).join(' ') || '—'}</td><td data-l="Region">${esc(uName(x.region_id) || '—')}</td>` : ''}<td data-l="Food hygiene">${fhrsChip(x)}</td><td><a class="btn sm" href="#/site/${x.id}">Open</a></td></tr>`).join('')}</tbody></table></div>`
+    : '<p class="muted" style="margin:0">No sites yet. Add the first premises.</p>'}</div>`;
+}
+
 function vClient(id) {
-  const c = byId('clients', id); if (!c) return `<div class="page">${empty('Client not found', '')}</div>`;
-  const sites = clientSites(id), ras = rows('assessments').filter((a) => a.client_id === id), inv = rows('portal_invites').filter((i) => i.client_id === id);
+  const c = byId('clients', id); if (!c) return `<div class="page">${empty('Organisation not found', '')}</div>`;
+  const ras = rows('assessments').filter((a) => a.client_id === id), inv = rows('portal_invites').filter((i) => i.client_id === id);
   const joined = (email) => rows('profiles').some((p) => p.email === email);
   const portal = location.origin + location.pathname, canP = PEOPLE_OK(), secs = c.sectors || [];
-  return `<div class="page">${CO() ? '' : '<a class="btn sm ghost" href="#/clients">← All clients</a>'}
-  <div class="sect" style="margin-top:8px"><h2>${esc(c.name)}</h2><div class="row"><button class="btn" data-act="newRA" data-client="${id}">+ Create risk assessment</button>${CO() ? '' : `<button class="btn teal" data-act="openAs" data-id="${id}">Open as company</button>`}${SUPER() ? `<button class="btn dng" data-act="delClient" data-id="${id}">Delete client</button>` : ''}</div></div>
-  <div class="panel"><h3 style="font-size:16px;margin-bottom:12px">Head office and contact</h3><div class="g2">${field(`clients|${id}|name`, c.name, 'Company name')}${field(`clients|${id}|contact_name`, c.contact_name, 'Contact name')}${field(`clients|${id}|contact_email`, c.contact_email, 'Contact email', 'email')}${field(`clients|${id}|phone`, c.phone, 'Phone')}${area(`clients|${id}|notes`, c.notes, 'Notes', ' class="full"')}</div></div>
-  ${chPanel(c)}
+  return `<div class="page">${CO() ? '' : '<a class="btn sm ghost" href="#/clients">← All organisations</a>'}
+  <div class="sect" style="margin-top:8px"><h2>${esc(c.name)}</h2><div class="row"><button class="btn" data-act="newRA" data-client="${id}">+ Create risk assessment</button>${CO() ? '' : `<button class="btn teal" data-act="openAs" data-id="${id}">Open as company</button>`}${SUPER() ? `<button class="btn dng" data-act="delClient" data-id="${id}">Delete organisation</button>` : ''}</div></div>
+  <div class="panel"><h3 style="font-size:16px;margin-bottom:12px">Organisation details</h3><div class="g2">${field(`clients|${id}|name`, c.name, 'Organisation name')}${field(`clients|${id}|contact_name`, c.contact_name, 'Main contact')}${field(`clients|${id}|contact_email`, c.contact_email, 'Contact email', 'email')}${field(`clients|${id}|phone`, c.phone, 'Phone')}${area(`clients|${id}|address`, c.address, 'Correspondence address (not a site)')}${area(`clients|${id}|notes`, c.notes, 'Notes')}</div></div>
+  ${sitesPanel(id)}
+  ${entityPanel(id)}
+  ${structurePanel(id)}
   <div class="panel"><h3 style="font-size:16px;margin-bottom:4px">Sectors</h3><p class="hint" style="margin:0 0 8px">${CO() ? 'Set by Safetybiz. The topic library shows topics for these sectors and General topics.' : 'The company administrator sees topic library topics for these sectors, plus General topics.'}</p>
   <div class="row">${CO() ? (secs.map((x) => `<span class="tag">${esc(x)}</span>`).join('') || '<span class="muted">None set</span>') : SECTORS().concat(secs.filter((x) => !SECTORS().includes(x))).map((x) => `<button class="chipbtn${secs.includes(x) ? ' on' : ''}" data-act="secTog" data-id="${id}" data-v="${esc(x)}">${secs.includes(x) ? '✓ ' : ''}${esc(x)}</button>`).join('')}</div></div>
-  ${structurePanel(id)}
-  <div class="panel"><div class="sect"><h3>Sites</h3><button class="btn sm" data-act="addSite" data-id="${id}">+ Add site</button></div>
-  <div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Belongs to</th><th>Address</th><th>Site contact</th><th>Phone</th><th>Assessments</th><th>Food hygiene</th><th></th><th></th></tr></thead><tbody>${sites.map((s) => `<tr><td data-l="Site"><input id="s-${s.id}-n" data-b="sites|${s.id}|name" value="${esc(s.name)}" aria-label="Site name">${s.is_head_office ? '<span class="muted">Head office</span>' : ''}</td><td data-l="Belongs to">${units(id).length ? sel(`sites|${s.id}|unit_id`, s.unit_id || '', unitOpts(id), '') : '<span class="muted">—</span>'}</td><td data-l="Address"><input id="s-${s.id}-a" data-b="sites|${s.id}|address" value="${esc(s.address)}" aria-label="Address"></td><td data-l="Site contact"><input id="s-${s.id}-c" data-b="sites|${s.id}|site_contact" value="${esc(s.site_contact)}" aria-label="Site contact"></td><td data-l="Phone"><input id="s-${s.id}-p" data-b="sites|${s.id}|phone" value="${esc(s.phone)}" aria-label="Phone"></td><td data-l="Assessments">${ras.filter((a) => a.site_id === s.id).length}</td><td data-l="Food hygiene">${fhrsChip(s)}</td><td><a class="btn sm" href="#/compliance/${s.id}">Site profile</a></td><td>${s.is_head_office || CO() ? '' : `<button class="btn sm ghost" data-act="delSite" data-id="${s.id}" aria-label="Remove site">✕</button>`}</td></tr>`).join('')}</tbody></table></div></div>
-  <div class="panel"><div class="sect"><div><h3>Company administrators, managers and staff</h3><p class="hint">${canP ? '' : '<b>The company administrator adds the company\'s managers and staff.</b> '}Company administrators run the whole company. Regional and area managers see the shops under their brand, region or area: they close actions, upload certificates, record sign-offs and add staff. Staff see their site and sign. Portal address: <b>${esc(portal)}</b> <button class="btn sm" data-act="copy" data-v="${esc(portal)}">Copy</button></p></div>${canP ? `<button class="btn sm pri" data-act="invite" data-client="${id}">+ Add person</button>` : !hasCoAdmin(id) && !CO() ? `<button class="btn sm pri" data-act="invite" data-client="${id}" data-role="client_admin">+ Add company administrator</button>` : ''}</div>
-  ${inv.length ? `<div class="tw"><table class="stack"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Looks after</th><th>Job title</th><th>Status</th><th></th></tr></thead><tbody>${inv.map((i) => `<tr><td data-l="Name">${esc(i.full_name || '—')}</td><td data-l="Email">${esc(i.email)}</td><td data-l="Role">${canP ? sel(`portal_invites|${i.id}|role`, i.role, [['client_admin', 'Company administrator'], ['manager', 'Regional / area manager'], ['staff', 'Staff']], '') : esc(ROLE[i.role] || i.role)}</td><td data-l="Looks after">${!canP ? esc(i.role === 'manager' ? unitPath(i.unit_id) || '—' : i.role === 'client_admin' ? 'Whole company' : sName(i.site_id) || 'All sites') : i.role === 'manager' ? sel(`portal_invites|${i.id}|unit_id`, i.unit_id || '', unitOpts(id, '— choose —').slice(1), '') : i.role === 'client_admin' ? '<span class="muted">Whole company</span>' : sel(`portal_invites|${i.id}|site_id`, i.site_id || '', [['', 'All sites']].concat(sites.map((s) => [s.id, s.name])), '')}</td><td data-l="Job title">${esc(i.job_title || '—')}</td><td data-l="Status">${joined(i.email) ? '<span class="tag ok">Joined</span>' : '<span class="tag">Invited</span>'}</td><td>${canP ? `<button class="btn sm ghost" data-act="delInvite" data-id="${i.id}" aria-label="Remove access">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nobody yet. Add the company administrator first; they add their own managers and staff.</p>'}</div>
+  <div class="panel"><div class="sect"><div><h3>Company administrators, managers and staff</h3><p class="hint">${canP ? '' : '<b>The company administrator adds the company\'s managers and staff.</b> '}Company administrators run the whole organisation. Regional and area managers see the sites in their region or brand: they close actions, upload certificates, record sign-offs and add staff. Staff see their site and sign. Portal address: <b>${esc(portal)}</b> <button class="btn sm" data-act="copy" data-v="${esc(portal)}">Copy</button></p></div>${canP ? `<button class="btn sm pri" data-act="invite" data-client="${id}">+ Add person</button>` : !hasCoAdmin(id) && !CO() ? `<button class="btn sm pri" data-act="invite" data-client="${id}" data-role="client_admin">+ Add company administrator</button>` : ''}</div>
+  ${inv.length ? `<div class="tw"><table class="stack"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Looks after</th><th>Job title</th><th>Status</th><th></th></tr></thead><tbody>${inv.map((i) => `<tr><td data-l="Name">${esc(i.full_name || '—')}</td><td data-l="Email">${esc(i.email)}</td><td data-l="Role">${canP ? sel(`portal_invites|${i.id}|role`, i.role, [['client_admin', 'Company administrator'], ['manager', 'Regional / area manager'], ['staff', 'Staff']], '') : esc(ROLE[i.role] || i.role)}</td><td data-l="Looks after">${!canP ? esc(i.role === 'manager' ? unitPath(i.unit_id) || '—' : i.role === 'client_admin' ? 'Whole organisation' : sName(i.site_id) || 'All sites') : i.role === 'manager' ? sel(`portal_invites|${i.id}|unit_id`, i.unit_id || '', unitOpts(id, '— choose —').slice(1), '') : i.role === 'client_admin' ? '<span class="muted">Whole organisation</span>' : sel(`portal_invites|${i.id}|site_id`, i.site_id || '', [['', 'All sites']].concat(liveSites(id).map((s) => [s.id, s.name])), '')}</td><td data-l="Job title">${esc(i.job_title || '—')}</td><td data-l="Status">${joined(i.email) ? '<span class="tag ok">Joined</span>' : '<span class="tag">Invited</span>'}</td><td>${canP ? `<button class="btn sm ghost" data-act="delInvite" data-id="${i.id}" aria-label="Remove access">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nobody yet. Add the company administrator first; they add their own managers and staff.</p>'}</div>
   <div class="panel"><div class="sect"><h3>Risk assessments</h3></div>${ras.length ? raTable(ras) : '<p class="muted">None yet.</p>'}</div></div>`;
 }
+
+// ---------- site page ----------
+// The form edits a draft (S.sf) and saves on Save, so nothing is half-saved on a phone.
+// Certificates, service records, assessments, actions or sign-offs: such a site is archived, never deleted (also enforced by the database).
+const hasHistory = (sid) => ['site_documents', 'service_jobs', 'assessments', 'actions', 'acknowledgements'].some((t) => rows(t).some((r) => r.site_id === sid));
+const SF_KEYS = ['name', 'trading_name', 'address', 'legal_entity_id', 'business_activity', 'site_contact', 'contact_email', 'phone', 'region_id', 'status'];
+function vSite(id, cidNew) {
+  const isNew = id === 'new', s = isNew ? null : byId('sites', id), cid = isNew ? (CO() ? myCo() : cidNew) : s?.client_id;
+  if (!isNew && !s) return `<div class="page">${empty('Site not found', '')}</div>`;
+  if (!S.sf || S.sf._id !== id) S.sf = { _id: id, client_id: cid, brands: isNew ? [] : siteBrands(id), ...Object.fromEntries(SF_KEYS.map((k) => [k, (s && s[k]) || (k === 'status' ? 'Open' : '')])) };
+  const f = S.sf, inp = (k, lbl, type = 'text', cls = '') => `<label${cls}>${lbl}<input id="sf-${k}" data-sf="${k}" type="${type}" value="${esc(f[k])}"></label>`;
+  const ents = entities(cid), brands = brandsOf(cid), regs = regionOpts(cid);
+  const openA = isNew ? [] : rows('actions').filter((x) => x.status !== 'Done' && actSite(x) === id), odA = openA.filter(isOd), c = isNew ? null : ccTotals([id]);
+  const ras = isNew ? [] : rows('assessments').filter((a) => a.site_id === id).sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+  const tile = (n, l, href, al) => `<a class="stat${al && n ? ' alert' : ''}" href="${href}" style="text-decoration:none;color:inherit"><span>${l}</span><b>${n}</b></a>`;
+  return `<div class="page"><a class="btn sm ghost" href="#/client/${cid}">← ${esc(cName(cid))}</a>
+  <div class="sect" style="margin-top:8px"><div><h2>${isNew ? 'Add a site' : esc(s.name)} ${isNew ? '' : siteStatus(s)}</h2>${isNew ? '' : `<p class="hint">${esc(s.address || 'No address recorded')}</p>`}</div>${isNew ? '' : `<div class="row"><a class="btn" href="#/compliance/${id}">Certificates</a></div>`}</div>
+  ${isNew ? '' : `<div class="stats">${tile(c.Valid, 'Certificates valid', `#/compliance/${id}`)}${tile(c['Due soon'], 'Due in 30 days', `#/compliance/${id}`, 1)}${tile(c.Expired, 'Expired', `#/compliance/${id}`, 1)}${tile(c.Missing, 'Missing', `#/compliance/${id}`, 1)}${tile(openA.length, 'Open actions', '#/actions')}${tile(odA.length, 'Overdue actions', '#/actions', 1)}</div>`}
+  <div class="panel"><h3 style="font-size:16px;margin-bottom:12px">Site details</h3><div class="g2">
+  ${inp('name', 'Site name')}${inp('trading_name', 'Trading name (if different)')}
+  <label class="full">Physical address<textarea id="sf-address" data-sf="address" style="min-height:52px">${esc(f.address)}</textarea></label>
+  <label>Legal entity<select id="sf-legal_entity_id" data-sf="legal_entity_id"><option value="">Not set</option>${ents.map((e) => `<option value="${e.id}"${f.legal_entity_id === e.id ? ' selected' : ''}>${esc(e.name)} — ${entLine(e)}</option>`).join('')}<option value="__new">+ Add a legal entity…</option></select></label>
+  ${inp('business_activity', 'Business activity', 'text')}
+  ${inp('site_contact', 'Site manager')}${inp('contact_email', 'Site manager email', 'email')}${inp('phone', 'Phone')}
+  <label>Status<select id="sf-status" data-sf="status">${['Open', 'Temporarily closed', 'Archived'].map((v) => `<option${f.status === v ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+  ${brands.length ? `<div class="full"><label>Brands at this site (optional, any number)</label><div class="row" style="margin-top:6px">${brands.map((b) => `<label class="chk" style="border:1px solid var(--line);border-radius:20px;padding:5px 11px"><input type="checkbox" data-sf="brand" value="${b.id}"${f.brands.includes(b.id) ? ' checked' : ''}> ${esc(b.name)}</label>`).join('')}</div></div>` : ''}
+  ${regs.length > 1 ? `<label>Region (optional)<select id="sf-region_id" data-sf="region_id">${regs.map(([v, t]) => `<option value="${v}"${f.region_id === v ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></label>` : ''}
+  </div>${f.status === 'Archived' ? '<p class="hint">Archived: hidden from lists, pickers and totals. Its certificates, assessments, sign-offs and actions stay readable.</p>' : ''}
+  <div class="row" style="margin-top:14px"><button class="btn pri" data-act="siteSave">${isNew ? 'Add site' : 'Save changes'}</button>${isNew ? '' : '<button class="btn ghost" data-act="siteReset">Discard changes</button>'}${!isNew && !CO() && !hasHistory(id) ? `<button class="btn dng sp" data-act="delSite" data-id="${id}">Delete site</button>` : ''}</div>${!isNew && hasHistory(id) && f.status !== 'Archived' ? '<p class="hint">This site has compliance records. To close it, set Status to Archived: it is hidden from lists and totals and its records are kept.</p>' : ''}</div>
+  ${isNew ? '' : `<div class="panel"><div class="sect"><h3>Risk assessments at this site</h3><a class="btn sm" href="#/ras">All risk assessments</a></div>${ras.length ? ras.map((a) => `<a class="li" href="#/ra/${a.id}/details">${statusTag(a.status)}<span style="flex:1"><b>${esc(a.title || 'Untitled')}</b><br><span class="muted">${a.published_version ? 'Published v' + a.published_version : 'Not published'} · renewal ${fd(a.review_date)}${a.master_id ? ' · from a master' : ''}</span></span></a>`).join('') : '<p class="muted" style="margin:0">None yet.</p>'}</div>
+  <div class="panel"><h3 style="font-size:16px;margin-bottom:8px">Food hygiene rating</h3>${fhrsChip(s)} <a class="btn sm" href="#/compliance/${id}">Manage on the certificates page</a></div>`}</div>`;
+}
+async function siteSave() {
+  const f = S.sf, name = (f.name || '').trim(); if (!name) return toast('Enter the site name', true);
+  if (f.contact_email && !/^\S+@\S+\.\S+$/.test(f.contact_email)) return toast('Enter a valid site manager email', true);
+  const row = Object.fromEntries(SF_KEYS.map((k) => [k, typeof f[k] === 'string' ? f[k].trim() || null : f[k] || null]));
+  row.name = name; row.status = f.status || 'Open';
+  try {
+    let id = f._id;
+    if (id === 'new') { row.client_id = f.client_id; await ins('sites', row); id = row.id; }
+    else await upd('sites', id, row);
+    const have = siteBrands(id), want = f.brands;
+    for (const b of have.filter((x) => !want.includes(x))) { await queue(() => sb.from('site_brands').delete().eq('site_id', id).eq('brand_id', b)); D.site_brands = rows('site_brands').filter((x) => !(x.site_id === id && x.brand_id === b)); }
+    for (const b of want.filter((x) => !have.includes(x))) { const r = { site_id: id, brand_id: b }; await queue(() => sb.from('site_brands').insert(r)); rows('site_brands').push(r); }
+    const fresh = await fetchAll('sites', '*', (q) => q.eq('id', id)); if (fresh[0]) D.sites = rows('sites').filter((x) => x.id !== id).concat(fresh);
+    S.sf = null; toast(f._id === 'new' ? 'Site added' : 'Saved');
+    if (f._id === 'new') location.hash = '#/site/' + id; else window.__render();
+  } catch (e) { toast(niceError(e), true); }
+}
 function inviteModal(clientId, role = 'staff') {
-  const sites = clientSites(clientId);
+  const sites = liveSites(clientId);
   openModal(`<h3>Add a person — ${esc(cName(clientId))}</h3><div class="g2"><label>Full name<input id="iv-n"></label><label>Email<input id="iv-e" type="email"></label><label>Job title<input id="iv-j"></label>
-  <label>Role<select id="iv-r"><option value="client_admin"${role === 'client_admin' ? ' selected' : ''}>Company administrator — runs the whole company</option>${PEOPLE_OK() ? `<option value="manager">Regional / area manager — the shops under them</option><option value="staff"${role === 'staff' ? ' selected' : ''}>Staff — reads and signs</option>` : ''}</select></label>
-  <label class="full" id="iv-sl">Site<select id="iv-s"><option value="">All sites</option>${sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>
-  <label class="full" id="iv-ul" style="display:none">Looks after<select id="iv-u">${unitOpts(clientId).slice(1).map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('')}</select>${units(clientId).length ? '' : '<span class="hint">Add a brand, region or area on the company page first.</span>'}</label></div>
+  <label>Role<select id="iv-r"><option value="client_admin"${role === 'client_admin' ? ' selected' : ''}>Company administrator — runs the whole organisation</option>${PEOPLE_OK() ? `<option value="manager">Regional / area manager — the sites in their region or brand</option><option value="staff"${role === 'staff' ? ' selected' : ''}>Staff — reads and signs</option>` : ''}</select></label>
+  <label class="full" id="iv-sl">Site<select id="iv-s"><option value="">— Choose their site —</option>${sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}<option value="all">All sites</option></select></label>
+  <label class="full" id="iv-ul" style="display:none">Looks after<select id="iv-u">${unitOpts(clientId).slice(1).map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('')}</select>${units(clientId).length ? '' : '<span class="hint">Add a brand or region on the organisation page first.</span>'}</label></div>
   <p class="hint">They sign in at the portal address with this email and get a one-time sign-in link. No password needed.</p>
   <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="inviteSave" data-client="${clientId}">Add user</button></div>`);
   const sync = () => { const m = $('#iv-r').value; $('#iv-ul').style.display = m === 'manager' ? '' : 'none'; $('#iv-sl').style.display = m === 'staff' ? '' : 'none'; };
@@ -348,15 +459,16 @@ function newRAModal(clientId, topicId) {
   if (topicId) $('#nr-t').value = byId('topic_library', topicId)?.title || '';
   $('#nr-c').onchange = (e) => { $('#nr-s').innerHTML = siteOrBrandOpts(e.target.value); };
 }
+// Only Safetybiz creates masters (organisation-wide or for a brand); organisations create site assessments.
 function siteOrBrandOpts(cid) {
-  const brands = units(cid).filter((u) => u.kind === 'brand');
-  return `<optgroup label="Sites">${clientSites(cid).map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</optgroup>${brands.length ? `<optgroup label="Brand master — copied to the brand's sites">${brands.map((b) => `<option value="m:${b.id}">★ ${esc(b.name)} — brand master</option>`).join('')}</optgroup>` : ''}`;
+  const brands = brandsOf(cid);
+  return `<optgroup label="Sites">${liveSites(cid).map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</optgroup>${CO() ? '' : `<optgroup label="Master — copied to sites, managed by Safetybiz"><option value="o:${cid}">★ Whole organisation — master</option>${brands.map((b) => `<option value="m:${b.id}">★ ${esc(b.name)} — brand master</option>`).join('')}</optgroup>`}`;
 }
 async function newRASave() {
   const fv = $('#nr-from').value, from = fv.startsWith('a:') ? byId('assessments', fv.slice(2)) : fv.startsWith('t:') ? byId('topic_library', fv.slice(2)) : null, isTopic = fv.startsWith('t:');
-  const sv = $('#nr-s').value, brand = sv.startsWith('m:') ? byId('org_units', sv.slice(2)) : null, site = brand ? null : byId('sites', sv);
-  if (!site && !brand) return toast('Choose a site', true);
-  const a = { id: uid(), ref: newRef(), title: $('#nr-t').value.trim() || from?.title || '', client_id: (site || brand).client_id, site_id: site ? site.id : null, is_master: !!brand, unit_id: brand ? brand.id : null, status: 'Draft', assessor: S.me.full_name || '', assessment_date: today(), review_date: addDays(today(), 365),
+  const sv = $('#nr-s').value, brand = sv.startsWith('m:') ? byId('org_units', sv.slice(2)) : null, org = sv.startsWith('o:') ? byId('clients', sv.slice(2)) : null, site = brand || org ? null : byId('sites', sv);
+  if (!site && !brand && !org) return toast('Choose a site', true);
+  const a = { id: uid(), ref: newRef(), title: $('#nr-t').value.trim() || from?.title || '', client_id: org ? org.id : (site || brand).client_id, site_id: site ? site.id : null, is_master: !!(brand || org), unit_id: brand ? brand.id : null, status: 'Draft', assessor: S.me.full_name || '', assessment_date: today(), review_date: addDays(today(), 365),
     topic_id: isTopic ? from.id : from?.topic_id || null, description: from?.description || null, people_exposed: from ? [...from.people_exposed] : ['Colleagues'], init_l: from?.init_l || 0, init_s: from?.init_s || 0, res_l: from?.res_l || 0, res_s: from?.res_s || 0, published_version: 0, updated_at: nowIso() };
   closeModal();
   try {
@@ -382,19 +494,21 @@ async function newRASave() {
 function vRA(id, tab) {
   const a = byId('assessments', id); if (!a) return `<div class="page">${empty('Risk assessment not found', '')}</div>`;
   const tabs = a.is_master
-    ? [['details', 'Details'], ['hazards', 'Hazards and controls', raHz(id).length], ['rating', 'Overall rating'], ['summary', 'Summary and approval'], ['brandsites', 'Brand sites', copiesOf(id).length], ['history', 'History']]
+    ? (CO() ? [['mview', 'Master (managed by Safetybiz)'], ['brandsites', 'Sites using it', copiesOf(id).length]]
+      : [['details', 'Details'], ['hazards', 'Hazards and controls', raHz(id).length], ['rating', 'Overall rating'], ['summary', 'Summary and approval'], ['brandsites', 'Sites using it', copiesOf(id).length], ['history', 'History']])
     : [['details', 'Details'], ['hazards', 'Hazards and controls', raHz(id).length], ['rating', 'Overall rating'], ['actions', 'Actions', raActs(id).filter((x) => x.status !== 'Done').length], ['audits', 'Audits', rows('audits').filter((u) => u.assessment_id === id).length], ['summary', 'Summary and approval'], ['publish', 'Publish and sign-offs', raAcks(id).length], ['history', 'History']];
   if (tab === 'controls') tab = 'hazards';
   if (a.is_master && ['actions', 'audits', 'publish'].includes(tab)) tab = 'brandsites';
-  const fn = { details: tDetails, hazards: tHazards, controls: tHazards, rating: tRating, summary: tSummary, actions: tActions, audits: tAudits, publish: tPublish, history: tHistory, brandsites: tBrandSites }[tab] || tDetails;
-  return `<div class="head"><div class="row"><a class="btn sm ghost" href="#/ras">← Risk assessments</a><div class="row sp"><button class="btn sm" data-act="pdf" data-id="${id}">Export PDF</button><button class="btn sm" data-act="dupRA" data-id="${id}">Copy to other sites</button><button class="btn sm dng" data-act="delRA" data-id="${id}">Delete</button></div></div>
+  if (a.is_master && CO() && tab !== 'brandsites') tab = 'mview';
+  const fn = { details: tDetails, hazards: tHazards, controls: tHazards, rating: tRating, summary: tSummary, actions: tActions, audits: tAudits, publish: tPublish, history: tHistory, brandsites: tBrandSites, mview: tMasterView }[tab] || tDetails;
+  return `<div class="head"><div class="row"><a class="btn sm ghost" href="#/ras">← Risk assessments</a><div class="row sp"><button class="btn sm" data-act="pdf" data-id="${id}">Export PDF</button><button class="btn sm" data-act="dupRA" data-id="${id}">Copy to other sites</button>${a.is_master && CO() ? '' : `<button class="btn sm dng" data-act="delRA" data-id="${id}">Delete</button>`}</div></div>
   <h2>${esc(a.title || 'Untitled risk assessment')}</h2><div class="meta"><b style="color:var(--ink)">${esc(a.ref)}</b><span>${esc(cName(a.client_id))} · ${esc(raWhere(a))}</span>${a.is_master ? '<span class="tag k-brand">Brand master</span>' : statusTag(a.status) + pubTag(a)}${a.master_id && byId('assessments', a.master_id) ? `<a class="tag" href="#/ra/${a.master_id}/brandsites">From brand master</a>` : ''}${(() => { const k = raK(a); return `<span>Flagged <b style="color:${k.f ? 'var(--vh)' : 'var(--ink)'}">${k.f}</b></span><span>Actions <b style="color:var(--ink)">${raActs(a.id).filter((x) => x.status !== 'Done').length}</b></span>`; })()}${a.approved_at ? '<span class="tag ok">Complete</span>' : '<span class="tag warn">Incomplete</span>'}<span>Renewal <b class="${a.review_date && a.review_date < today() ? 'od-t' : ''}">${fd(a.review_date)}</b></span></div>
   <nav class="tabs">${tabs.map(([k, l, n]) => `<a href="#/ra/${id}/${k}" class="${tab === k ? 'on' : ''}">${l}${n != null ? `<span class="n">${n}</span>` : ''}</a>`).join('')}</nav></div><div class="page">${fn(a)}</div>`;
 }
 function tDetails(a) {
   const id = a.id, ppl = a.people_exposed || [], extra = ppl.filter((p) => !PEOPLE.includes(p));
   return `<div class="panel"><div class="g2">${field(`assessments|${id}|title`, a.title, 'Name of the risk assessment', 'text', ' class="full"')}
-  ${a.is_master ? `<label>Client<input value="${esc(cName(a.client_id))}" disabled></label><label>Brand<input value="${esc(byId('org_units', a.unit_id)?.name || '')}" disabled></label>` : sel(`assessments|${id}|client_id`, a.client_id, rows('clients').map((c) => [c.id, c.name]), 'Client') + sel(`assessments|${id}|site_id`, a.site_id, clientSites(a.client_id).map((s) => [s.id, s.name]), 'Site')}
+  ${a.is_master ? `<label>Client<input value="${esc(cName(a.client_id))}" disabled></label><label>Applies to<input value="${esc(raWhere(a))}" disabled></label>` : sel(`assessments|${id}|client_id`, a.client_id, rows('clients').map((c) => [c.id, c.name]), 'Client') + sel(`assessments|${id}|site_id`, a.site_id, clientSites(a.client_id).map((s) => [s.id, s.name]), 'Site')}
   ${area(`assessments|${id}|description`, a.description, 'Description — what this assessment covers', ' class="full"')}
   <div class="full"><label>People exposed</label><div class="row" style="margin-top:6px">${PEOPLE.concat(extra).map((p) => `<label class="chk" style="border:1px solid var(--line);border-radius:20px;padding:6px 12px;background:${ppl.includes(p) ? 'var(--soft)' : '#fff'}"><input type="checkbox" data-act="ppl" data-v="${esc(p)}"${ppl.includes(p) ? ' checked' : ''}> ${esc(p)}</label>`).join('')}
   <input id="ppl-new" placeholder="Add other…" style="width:180px"><button class="btn sm" data-act="pplAdd">Add</button></div></div>
@@ -703,14 +817,24 @@ function vTeam() {
 }
 
 // ---------- brand masters ----------
-const brandSitesWithout = (m) => { const have = new Set(copiesOf(m.id).map((x) => x.site_id)); return unitSites(m.unit_id).filter((st) => !have.has(st.id)).map((st) => st.id); };
+const masterSites = (m) => (m.unit_id ? unitSites(m.unit_id).filter(isOpen) : liveSites(m.client_id));
+const brandSitesWithout = (m) => { const have = new Set(copiesOf(m.id).map((x) => x.site_id)); return masterSites(m).filter((st) => !have.has(st.id)).map((st) => st.id); };
+// Organisations see a master read-only: Safetybiz owns it; each site's copy is theirs to adjust.
+function tMasterView(a) {
+  const hz = raHz(a.id), gen = genCtl(a);
+  const ctls = (list) => list.length ? `<ul class="ctlist">${list.map((c) => `<li>${esc(c.title)} <span class="muted">· ${esc(c.type)}</span></li>`).join('')}</ul>` : '<p class="muted" style="margin:4px 0">No controls.</p>';
+  return `<div class="panel"><p class="hint" style="margin-top:0">This master is managed by Safetybiz. Copy it to your sites from <a href="#/ra/${a.id}/brandsites">Sites using it</a>; each site's copy is yours to adjust, publish and sign.</p>
+  ${a.description ? `<p>${esc(a.description)}</p>` : ''}<p class="muted">People exposed: ${esc((a.people_exposed || []).join(', ') || '—')}</p></div>
+  ${hz.map((h, i) => `<div class="panel"><h3 style="font-size:16px">${i + 1}. ${esc(h.title || 'Untitled hazard')} <span class="muted" style="font-weight:400">· ${esc(h.category || '')}</span></h3>${h.description ? `<p class="muted">${esc(h.description)}</p>` : ''}${ctls(hzCtl(a.id, h.id))}</div>`).join('')}
+  ${gen.length ? `<div class="panel"><h3 style="font-size:16px">General controls</h3>${ctls(gen)}</div>` : ''}`;
+}
 function tBrandSites(a) {
   const cs = copiesOf(a.id).sort((x, y) => sName(x.site_id).localeCompare(sName(y.site_id))), missing = brandSitesWithout(a);
-  return `<div class="sect"><div><h2>Brand sites</h2><p class="hint">This master is the brand's standard. Each site has its own copy, where the site sets its own answers and can add local hazards or controls.</p></div>
-  <div class="row"><button class="btn" data-act="dupRA" data-id="${a.id}">Copy to brand sites${missing.length ? ` (${missing.length} without a copy)` : ''}</button>${cs.length ? `<button class="btn pri" data-act="syncAll">Update all ${cs.length} site cop${cs.length === 1 ? 'y' : 'ies'}</button>` : ''}</div></div>
+  return `<div class="sect"><div><h2>Sites using it</h2><p class="hint">This master is the ${a.unit_id ? 'brand\'s' : 'organisation\'s'} standard. Each site has its own copy, where the site sets its own answers and can add local hazards or controls.</p></div>
+  <div class="row"><button class="btn" data-act="dupRA" data-id="${a.id}">Copy to ${a.unit_id ? 'brand' : 'organisation'} sites${missing.length ? ` (${missing.length} without a copy)` : ''}</button>${cs.length ? `<button class="btn pri" data-act="syncAll">Update all ${cs.length} site cop${cs.length === 1 ? 'y' : 'ies'}</button>` : ''}</div></div>
   ${cs.length ? `<div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Copy</th><th>Status</th><th>Published</th><th>Last updated from master</th></tr></thead><tbody>${cs.map((x) => `<tr class="click" data-go="ra/${x.id}/details"><td data-l="Site"><b>${esc(sName(x.site_id))}</b></td><td data-l="Copy">${esc(x.ref)}</td><td data-l="Status">${statusTag(x.status)}</td><td data-l="Published">${pubTag(x)}</td><td data-l="Last updated">${x.master_synced_at ? ft(x.master_synced_at) : '—'}</td></tr>`).join('')}</tbody></table></div>`
-    : empty('No site copies yet', unitSites(a.unit_id).length ? 'Copy this master to the brand\'s sites to get started.' : 'Put sites under this brand on the company page, then copy the master to them.', '')}
-  ${missing.length && cs.length ? `<p class="hint">${missing.length} brand site${missing.length > 1 ? 's don\'t' : ' doesn\'t'} have a copy yet: ${missing.map((sid) => esc(sName(sid))).join(', ')}.</p>` : ''}`;
+    : empty('No site copies yet', masterSites(a).length ? 'Copy this master to the sites to get started.' : 'Add the brand to its sites on each site page, then copy the master to them.', '')}
+  ${missing.length && cs.length ? `<p class="hint">${missing.length} site${missing.length > 1 ? 's don\'t' : ' doesn\'t'} have a copy yet: ${missing.map((sid) => esc(sName(sid))).join(', ')}.</p>` : ''}`;
 }
 function syncModal(m) {
   const cs = copiesOf(m.id), pub = cs.filter((x) => x.published_version > 0).length;
@@ -768,7 +892,7 @@ function copyModal(ids, pre = []) {
   const src = ids.map((id) => byId('assessments', id)).filter(Boolean); if (!src.length) return;
   const preset = new Set(pre);
   const from = new Set(src.map((a) => a.site_id));
-  const groups = [...rows('clients')].sort((a, b) => a.name.localeCompare(b.name)).map((c) => [c, clientSites(c.id)]).filter(([, ss]) => ss.length);
+  const groups = [...rows('clients')].sort((a, b) => a.name.localeCompare(b.name)).map((c) => [c, liveSites(c.id)]).filter(([, ss]) => ss.length);
   openModal(`<h3>Copy ${src.length === 1 ? '“' + esc(src[0].title || 'Untitled') + '”' : src.length + ' risk assessments'} to other sites</h3>
   ${src.length > 1 ? `<p class="muted" style="margin-top:-6px">${src.map((a) => esc(a.title || 'Untitled')).join(' · ')}</p>` : ''}
   <p class="hint" style="margin-top:0">Each site gets its own Draft copy with the hazards, controls, risk scores and people affected. Actions, audits, approval and sign-offs are not copied.</p>
@@ -803,20 +927,27 @@ export async function adminClick(e, b) {
     case 'copy': try { await navigator.clipboard.writeText(d.v); toast('Copied'); } catch { toast('Copy failed', true); } return;
     case 'onboard': return onboardModal();
     case 'onboardSave': return onboardSave();
-    case 'addSite': await ins('sites', { client_id: d.id, name: 'New site' }); return window.__render();
-    case 'delSite': if (await confirmBox('Remove this site? Sites with risk assessments cannot be removed.')) { await del('sites', d.id).catch(() => {}); window.__render(); } return;
+    case 'delSite': { const cid = byId('sites', d.id)?.client_id; if (await confirmBox('Delete this site? Only a site with no records can be deleted — archive it instead (Status → Archived) to keep its history.', 'Delete')) { try { await del('sites', d.id); S.sf = null; location.hash = '#/client/' + cid; } catch (e) { /* shown */ } } return; }
     case 'delClient': if (await confirmBox('Delete this client, its sites and portal users? Clients with risk assessments cannot be deleted.')) { del('clients', d.id).then(() => (location.hash = '#/clients')).catch(() => {}); } return;
     case 'invite': return inviteModal(d.client || a?.client_id, d.role || (PEOPLE_OK() ? 'staff' : 'client_admin'));
     case 'chSearch': return chSearch(d.ctx, b);
     case 'chPick': return chPick(d.ctx, d.n, b);
-    case 'chRefresh': { b.disabled = true; try { const x = await chCall({ action: 'get', number: byId('clients', d.id).company_number }); if (x) { await upd('clients', d.id, chFields(x)); toast('Updated from Companies House'); } else toast('Companies House no longer has this company number', true); } catch (er) { toast(er.message, true); } return window.__render(); }
-    case 'chUnlink': if (await confirmBox('Unlink this company from its Companies House record? The details shown here are removed; nothing changes at Companies House.', 'Unlink')) { await upd('clients', d.id, { company_number: null, company_status: null, company_type: null, incorporated_on: null, registered_address: null, sic_codes: [], directors: [], ch_checked_at: null }).catch(() => {}); window.__render(); } return;
+    case 'leAdd': return leModal(d.c, null, false);
+    case 'leEdit': return leModal(byId('legal_entities', d.id).client_id, d.id, false);
+    case 'leSave': return leSave();
+    case 'leRefresh': { b.disabled = true; try { const e = byId('legal_entities', d.id), x = await chCall({ action: 'get', number: e.company_number }); if (x) { const r = chEntity(x); delete r.entity_type; await upd('legal_entities', e.id, r); toast('Updated from Companies House'); } else toast('Companies House no longer has this company number', true); } catch (er) { toast(er.message, true); } return window.__render(); }
+    case 'leDel': if (await confirmBox('Remove this legal entity? It is not used by any site.', 'Remove')) { await del('legal_entities', d.id).catch(() => {}); window.__render(); } return;
+    case 'structShow': S.showStruct[d.c] = true; return window.__render();
+    case 'archTog': S.showArch[d.c] = !S.showArch[d.c]; return window.__render();
+    case 'siteSave': return siteSave();
+    case 'siteReset': S.sf = null; return window.__render();
     case 'secTog': { const c = byId('clients', d.id), set = new Set(c.sectors || []); set.has(d.v) ? set.delete(d.v) : set.add(d.v); upd('clients', c.id, { sectors: [...set] }).catch(() => {}); return window.__render(); }
     case 'inviteSave': {
       const email = $('#iv-e').value.trim().toLowerCase(); if (!/^\S+@\S+\.\S+$/.test(email)) return toast('Enter a valid email', true);
-      const role = $('#iv-r').value, unit = $('#iv-u')?.value || null;
+      const role = $('#iv-r').value, unit = $('#iv-u')?.value || null, sv = $('#iv-s').value;
+      if (role === 'staff' && !sv) return toast('Choose their site, or All sites', true);
       if (role === 'manager' && !unit) return toast('Choose the brand, region or area they look after', true);
-      const row = { email, role, client_id: d.client, site_id: role === 'staff' ? $('#iv-s').value || null : null, unit_id: role === 'manager' ? unit : null, full_name: $('#iv-n').value.trim() || null, job_title: $('#iv-j').value.trim() || null };
+      const row = { email, role, client_id: d.client, site_id: role === 'staff' && sv !== 'all' ? sv : null, unit_id: role === 'manager' ? unit : null, full_name: $('#iv-n').value.trim() || null, job_title: $('#iv-j').value.trim() || null };
       closeModal(); await ins('portal_invites', row).catch(() => {}); await refreshProfiles(); toast('Added — they sign in at the portal address with their email'); return window.__render();
     }
     case 'delInvite': if (await confirmBox('Remove this person\'s portal access? Their past sign-offs are kept.', 'Remove access')) { await del('portal_invites', d.id).catch(() => {}); await refreshProfiles(); window.__render(); } return;
@@ -828,12 +959,14 @@ export async function adminClick(e, b) {
     case 'dupRA': return a.is_master ? copyModal([a.id], brandSitesWithout(a)) : copyModal([a.id]);
     case 'syncAll': return syncModal(a);
     case 'syncGo': return syncGo(a, b);
-    case 'openAs': S.asCo = d.id; viewAs(d.id); location.hash = '#/'; return window.__render();
-    case 'exitAs': { const back = S.asCo; S.asCo = null; $('#root').innerHTML = '<div class="boot"><p>Returning to Safetybiz view…</p></div>'; await loadAdmin(S.me); location.hash = '#/client/' + back; return window.__render(); }
-    case 'unitAdd': { const k = d.k, row = { client_id: d.c, parent_id: d.p || null, kind: k, name: 'New ' + KIND[k].toLowerCase(), sort: units(d.c).length };
+    case 'openAs': S.asCo = d.id; window.__viewAs = true; viewAs(d.id); location.hash = '#/'; return window.__render();
+    case 'exitAs': { const back = S.asCo; S.asCo = null; window.__viewAs = false; $('#root').innerHTML = '<div class="boot"><p>Returning to Safetybiz view…</p></div>'; await loadAdmin(S.me); location.hash = '#/client/' + back; return window.__render(); }
+    case 'unitAdd': { const k = d.k, base = 'New ' + KIND[k].toLowerCase(), taken = new Set(units(d.c).filter((u) => u.kind === k && (u.parent_id || null) === (d.p || null)).map((u) => u.name.trim().toLowerCase()));
+      let nm = base, n = 2; while (taken.has(nm.toLowerCase())) nm = `${base} ${n++}`;
+      const row = { client_id: d.c, parent_id: d.p || null, kind: k, name: nm, sort: units(d.c).length };
       await ins('org_units', row).catch(() => {}); window.__render(); return $(`#u-${row.id}-n`)?.select(); }
-    case 'unitDel': { const n = unitSites(d.id).length; if (await confirmBox(`Remove this ${KIND[byId('org_units', d.id).kind].toLowerCase()} and everything under it?${n ? ` Its ${n} site${n > 1 ? 's' : ''} will become ungrouped.` : ''} Managers linked to it lose access.`, 'Remove')) {
-      const ids = unitDesc(d.id); await del('org_units', d.id).catch(() => {}); D.org_units = rows('org_units').filter((u) => !ids.has(u.id)); rows('sites').forEach((st) => { if (ids.has(st.unit_id)) st.unit_id = null; }); window.__render(); } return; }
+    case 'unitDel': { const n = unitSites(d.id).length; if (await confirmBox(`Remove this ${KIND[byId('org_units', d.id).kind].toLowerCase()} and everything under it?${n ? ` Its ${n} site${n > 1 ? 's' : ''} will no longer carry it.` : ''} Managers linked to it lose access.`, 'Remove')) {
+      const ids = unitDesc(d.id); await del('org_units', d.id).catch(() => {}); D.org_units = rows('org_units').filter((u) => !ids.has(u.id)); D.site_brands = rows('site_brands').filter((x) => !ids.has(x.brand_id)); rows('sites').forEach((st) => { if (ids.has(st.region_id)) { st.region_id = null; st.unit_id = null; } }); window.__render(); } return; }
     case 'selRA': b.checked ? S.sel.add(d.id) : S.sel.delete(d.id); return window.__render();
     case 'selAll': { const ids = d.ids ? d.ids.split(',') : []; ids.forEach((id) => (b.checked ? S.sel.add(id) : S.sel.delete(id))); return window.__render(); }
     case 'selClear': S.sel.clear(); return window.__render();
@@ -940,6 +1073,12 @@ async function exportRA(a) {
 // field edits: data-b="table|id|field"
 export function adminField(el, isChange) {
   if (el.dataset.sj) return svField(el, isChange);
+  if (el.dataset.sf && S.sf) {
+    const k = el.dataset.sf;
+    if (k === 'brand') { const set = new Set(S.sf.brands); el.checked ? set.add(el.value) : set.delete(el.value); S.sf.brands = [...set]; return false; }
+    if (k === 'legal_entity_id' && el.value === '__new') { el.value = S.sf.legal_entity_id || ''; leModal(S.sf.client_id, null, true); return false; }
+    S.sf[k] = el.value; return k === 'status';
+  }
   if (el.dataset.ui === 'svq') { setSvQuery(el.value); return true; }
   if (el.dataset.ui) { S[el.dataset.ui] = el.value; return true; }
   if (el.dataset.so) { S.so[el.dataset.so] = el.value; if (el.dataset.so === 'c') { S.so.s = ''; S.so.a = ''; } return true; }
