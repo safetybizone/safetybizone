@@ -51,7 +51,7 @@ Updated 27 Nov 2026. Live: https://safetybizone.netlify.app/ · Repo: safetybizo
 ## Completed (latest first)
 - 27 Nov: **Releases 1 and 2 and the certificate delete deployed live.**
   - Before: local tests passed (`test_011` 63/63, `test_012` 16/16, `e2e_r2` 22/22, `e2e_certdel` 9/9, structure, CH and permission e2e). Backup schema `backup_20261127` taken; rollback rehearsed.
-  - Deployed: migrations 011 and 012; data step (Crawley kept with all its records, head office flag removed; nothing deleted); `companies-house` function v2; app files. Commits 2e9cc6f, da296a8, 87ccf61, a50cf58, cd045fa (`admin.js`), each checked byte-for-byte against GitHub (`admin.js` differs only in two literal non-breaking spaces in place of ` `, the same string at runtime).
+  - Deployed: migrations 011 and 012; data step (Crawley kept with all its records, head office flag removed; nothing deleted); `companies-house` function v2; app files. Commits 2e9cc6f, da296a8, 87ccf61, a50cf58, cd045fa (`admin.js`), each checked byte-for-byte against GitHub (`admin.js` differs only in two literal non-breaking spaces in place of their escape codes, the same string at runtime).
   - Live checks (run in transactions that were rolled back, as real users):
     - Existing records: counts in all 16 tables identical to the backup (1 organisation, 6 sites, 7 certificates incl. 2 N/A, 3 service jobs, 4 units, 6 food hygiene records).
     - Site creation: legal entity, site with region (`unit_id` mirrors it), 9 default certificate types, archive sets `archived_at`.
@@ -140,7 +140,7 @@ Updated 27 Nov 2026. Live: https://safetybizone.netlify.app/ · Repo: safetybizo
 - Default certificate list still to be confirmed (used only in Release 3; the current certificate list and N/A are unchanged).
 - `clients` still has the old Companies House columns (now unused); drop them in a later clean-up.
 - Companies House: do one real search in the app as an admin (add a legal entity) to confirm the full lookup.
-- Netlify could not be checked from here; hard-refresh the app to load the new files.
+- Hosting: Netlify Free ran out of credits on 27 Nov (each production deploy costs 15 of 300), so today's pushes were skipped. Upgraded to Personal ($9/month, 1,000 credits). Push each release as ONE commit to save credits.
 - Possible later option: withdraw a certificate (keep it, mark it void) instead of deleting.
 - Default applicable certificate list not yet confirmed (proposal in the review doc).
 - Owner side:
