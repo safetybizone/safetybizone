@@ -2,7 +2,7 @@
 import {
   sb, D, $, esc, uid, today, addDays, fd, ft, nowIso, band, chip, scoreOf, reduction, isOd, picker, ratingCard,
   CTYPES, CATS, PEOPLE, STATUSES, ASTAT, PRI, QS, auditScore, auditOutcome, ocol, toast, openModal, closeModal, confirmBox,
-  fetchAll, rows, byId, ins, upd, del, queue, niceError, field, area, sel, shell, signFormHTML, mountPad, submitSignOff, onRerender,
+  fetchAll, rows, byId, ins, upd, del, queue, niceError, field, area, sel, shell, signFormHTML, mountPad, submitSignOff, onRerender, sendInvite, sendReset,
 } from './core.js';
 import { assessmentPDF, signOffsPDF, ctlScore, raScore, ctlLabel } from './pdf.js';
 import { photoStrip } from './photos.js';
@@ -85,6 +85,37 @@ async function chPick(ctx, num, btn) {
   btn.disabled = false;
 }
 
+// ---------- delete an organisation (superadmin only; the database checks and logs it) ----------
+function orgDeleteModal(cid) {
+  const c = byId('clients', cid); if (!c || !SUPER() || !c.is_test) return;
+  const k = (t) => rows(t).filter((r) => r.client_id === cid).length, pl = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const sites = clientSites(cid), raIds = new Set(rows('assessments').filter((a) => a.client_id === cid).map((a) => a.id));
+  const acts = rows('actions').filter((x) => raIds.has(x.assessment_id) || sites.some((st) => st.id === x.site_id)).length;
+  const files = rows('site_documents').filter((x) => x.client_id === cid && x.file_path).length;
+  openModal(`<h3>Delete test organisation ${esc(c.name)}?</h3><p>These records are removed permanently and cannot be recovered:</p>
+  <ul class="ctlist"><li>${pl(sites.length, 'site', 'sites')}${sites.length ? ': ' + sites.map((st) => esc(st.name)).join(', ') : ''}</li>
+  <li>${pl(k('site_documents'), 'certificate', 'certificates')} (${pl(files, 'file', 'files')}) and ${pl(k('service_jobs'), 'service job', 'service jobs')}</li>
+  <li>${pl(raIds.size, 'risk assessment', 'risk assessments')}, with their sign-offs and audits</li>
+  <li>${pl(acts, 'action', 'actions')}</li>
+  <li>${pl(k('legal_entities'), 'legal entity', 'legal entities')}, ${pl(k('org_units'), 'brand or region', 'brands and regions')}</li>
+  <li>${pl(k('portal_invites'), 'person loses', 'people lose')} access to this organisation (their login accounts are kept)</li></ul>
+  <p class="hint">Other organisations and Safetybiz accounts are not affected. The deletion, these counts and your reason are kept in the admin log.</p>
+  <label>Type the organisation name to confirm<input id="od-n" autocomplete="off" placeholder="${esc(c.name)}"></label>
+  <label style="margin-top:10px">Reason (required)<textarea id="od-r" style="min-height:60px" placeholder="e.g. Test organisation no longer needed"></textarea></label>
+  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn dng" data-act="delClientGo" data-id="${cid}">Delete permanently</button></div>`, true);
+}
+async function orgDelete(cid, btn) {
+  const c = byId('clients', cid), name = ($('#od-n')?.value || '').trim(), reason = ($('#od-r')?.value || '').trim();
+  if (name.toLowerCase() !== (c?.name || '').trim().toLowerCase()) return toast('Type the organisation name exactly', true);
+  if (reason.length < 3) return toast('Give a reason', true);
+  btn.disabled = true;
+  const { data: paths, error } = await sb.rpc('delete_organisation', { cid, confirm_name: name, reason });
+  if (error) { btn.disabled = false; return toast(niceError(error), true); }
+  for (let i = 0; paths && i < paths.length; i += 100) await sb.storage.from('compliance').remove(paths.slice(i, i + 100)).catch(() => {});
+  closeModal(); toast(`${c.name} deleted`);
+  $('#root').innerHTML = '<div class="boot"><p>Refreshing…</p></div>'; await loadAdmin(S.me); location.hash = '#/clients'; window.__render();
+}
+
 // ---------- legal entities (per organisation, reusable across its sites) ----------
 const entities = (cid) => rows('legal_entities').filter((e) => e.client_id === cid).sort((a, b) => a.name.localeCompare(b.name));
 const entSites = (eid) => rows('sites').filter((x) => x.legal_entity_id === eid);
@@ -129,15 +160,15 @@ async function leSave() {
 export async function loadAdmin(me) {
   S.me = me; window.__me = me;
   const ackCols = 'id,assessment_id,version,user_id,email,full_name,job_title,method,site_id,statement,acknowledged_at';
-  const [clients, sites, invites, profiles, hreg, creg, hrc, ras, hz, ctl, acts, audits, pubs, acks, topics, thz, tct, cdt, sdocs, fhist, units, svjobs, ents, sbrands] = await Promise.all([
+  const [clients, sites, invites, profiles, hreg, creg, hrc, ras, hz, ctl, acts, audits, pubs, acks, topics, thz, tct, cdt, sdocs, fhist, units, svjobs, ents, sbrands, smgrs] = await Promise.all([
     fetchAll('clients'), fetchAll('sites'), fetchAll('portal_invites'), fetchAll('profiles'), fetchAll('hazard_register'), fetchAll('control_register'),
     fetchAll('hazard_register_controls'), fetchAll('assessments'), fetchAll('assessment_hazards'), fetchAll('assessment_controls'), fetchAll('actions'),
     fetchAll('audits'), fetchAll('published_assessments', 'id,assessment_id,client_id,site_id,version,note,published_at,published_by'), fetchAll('acknowledgements', ackCols),
     fetchAll('topic_library'), fetchAll('topic_hazards'), fetchAll('topic_controls'), fetchAll('compliance_doc_types'), fetchAll('site_documents'),
-    fetchAll('site_fhrs_history'), fetchAll('org_units'), fetchAll('service_jobs'), fetchAll('legal_entities'), fetchAll('site_brands'),
+    fetchAll('site_fhrs_history'), fetchAll('org_units'), fetchAll('service_jobs'), fetchAll('legal_entities'), fetchAll('site_brands'), fetchAll('site_managers', 'site_id,invite_id,created_at'),
   ]);
   Object.assign(D, { clients, sites, portal_invites: invites, profiles, hazard_register: hreg, control_register: creg, hazard_register_controls: hrc, assessments: ras,
-    assessment_hazards: hz, assessment_controls: ctl, actions: acts, audits, published_assessments: pubs, acknowledgements: acks, topic_library: topics, topic_hazards: thz, topic_controls: tct, compliance_doc_types: cdt, site_documents: sdocs, site_fhrs_history: fhist, org_units: units, service_jobs: svjobs, legal_entities: ents, site_brands: sbrands });
+    assessment_hazards: hz, assessment_controls: ctl, actions: acts, audits, published_assessments: pubs, acknowledgements: acks, topic_library: topics, topic_hazards: thz, topic_controls: tct, compliance_doc_types: cdt, site_documents: sdocs, site_fhrs_history: fhist, org_units: units, service_jobs: svjobs, legal_entities: ents, site_brands: sbrands, site_managers: smgrs });
   if (S.asCo) viewAs(S.asCo);
 }
 // Keep only one company's records in memory (Open as company).
@@ -147,7 +178,7 @@ function viewAs(cid) {
   byClient.forEach((t) => (D[t] = rows(t).filter((r) => (t === 'clients' ? r.id : r.client_id) === cid)));
   ['assessment_hazards', 'assessment_controls', 'actions', 'audits', 'acknowledgements'].forEach((t) => (D[t] = rows(t).filter((r) => raIds.has(r.assessment_id) || (t === 'actions' && r.site_id && byId('sites', r.site_id)))));
   D.service_jobs = rows('service_jobs').filter((j) => j.status === 'Issued');
-  const sids = new Set(rows('sites').map((x) => x.id)); D.site_brands = rows('site_brands').filter((x) => sids.has(x.site_id));
+  const sids = new Set(rows('sites').map((x) => x.id)); D.site_brands = rows('site_brands').filter((x) => sids.has(x.site_id)); D.site_managers = rows('site_managers').filter((x) => sids.has(x.site_id));
   const secs = byId('clients', cid)?.sectors || [];
   D.topic_library = rows('topic_library').filter((t) => t.active && (t.sector === 'General' || secs.includes(t.sector)));
   D.profiles = rows('profiles').filter((p) => p.client_id === cid || p.id === S.me.id);
@@ -190,6 +221,12 @@ const siteBrands = (sid) => rows('site_brands').filter((x) => x.site_id === sid)
 const unitSites = (uid) => { const ids = unitDesc(uid); return rows('sites').filter((s) => ids.has(s.region_id) || siteBrands(s.id).some((b) => ids.has(b))); };
 const isOpen = (s) => (s.status || 'Open') !== 'Archived';
 const liveSites = (cid) => clientSites(cid).filter(isOpen);
+// Site managers: people (invites with role manager) assigned directly to a site. An open site needs at least one.
+const siteMgrs = (sid) => rows('site_managers').filter((m) => m.site_id === sid).map((m) => byId('portal_invites', m.invite_id)).filter(Boolean);
+const mgrSiteIds = (iid) => rows('site_managers').filter((m) => m.invite_id === iid).map((m) => m.site_id);
+const pendingSites = (cid) => liveSites(cid).filter((x) => x.status === 'Pending setup');
+const joinedEmail = (email) => rows('profiles').some((p) => p.email === email);
+async function refreshSites(ids) { const fresh = await fetchAll('sites', '*', (q) => q.in('id', ids)); D.sites = rows('sites').filter((x) => !ids.includes(x.id)).concat(fresh); }
 const brandsOf = (cid) => units(cid).filter((u) => u.kind === 'brand').sort((a, b) => a.name.localeCompare(b.name));
 const uName = (id) => byId('org_units', id)?.name || '';
 const regionOpts = (cid) => [['', 'No region']].concat(unitTree(cid).filter(([u]) => u.kind !== 'brand').map(([u, d]) => [u.id, '  '.repeat(d) + (u.name || 'Untitled') + (u.kind === 'area' ? ' (area)' : '')]));
@@ -200,14 +237,17 @@ const mgrLabel = (i) => { const u = byId('org_units', i.unit_id); return u ? `${
 const raWhere = (a) => (a.is_master ? (a.unit_id ? `Brand master · ${byId('org_units', a.unit_id)?.name || 'brand'}` : 'Organisation master') : sName(a.site_id));
 const copiesOf = (mid) => rows('assessments').filter((x) => x.master_id === mid);
 // Brands and regions are optional and independent: a site can carry a brand, a region, both or neither.
-function structurePanel(cid) {
+function structurePanel(cid, which) {
   const all = units(cid), mgrs = rows('portal_invites').filter((i) => i.client_id === cid && i.role === 'manager');
-  if (!all.length && !S.showStruct[cid]) return `<div class="panel"><div class="sect" style="margin:0"><div><h3>Brands and regions</h3><p class="hint">Optional. Only needed for more than one brand, or for regional and area managers.</p></div><button class="btn sm" data-act="structShow" data-c="${cid}">Set up brands or regions</button></div></div>`;
+  if (!which && !all.length && !S.showStruct[cid]) return `<div class="panel"><div class="sect" style="margin:0"><div><h3>Brands and regions</h3><p class="hint">Optional. Only needed for more than one brand, or for regional and area managers.</p></div><button class="btn sm" data-act="structShow" data-c="${cid}">Set up brands or regions</button></div></div>`;
   const row = (u, d) => { const n = unitSites(u.id).filter(isOpen).length, m = mgrs.filter((i) => i.unit_id === u.id);
     return `<div class="tn" style="margin-left:${d * 26}px"><span class="tag k-${u.kind}">${KIND[u.kind]}</span><input id="u-${u.id}-n" data-b="org_units|${u.id}|name" value="${esc(u.name)}" aria-label="${KIND[u.kind]} name">
     <span class="muted">${n} site${n === 1 ? '' : 's'}${m.length ? ' · ' + m.map((i) => esc(i.full_name || i.email)).join(', ') : ''}</span>
     <div class="row sp" style="flex-wrap:nowrap">${u.kind === 'region' ? `<button class="btn sm ghost" data-act="unitAdd" data-c="${cid}" data-k="area" data-p="${u.id}">+ Area</button>` : ''}<button class="btn sm ghost" data-act="unitDel" data-id="${u.id}" aria-label="Remove">✕</button></div></div>`; };
   const brands = unitTree(cid).filter(([u]) => u.kind === 'brand'), regs = unitTree(cid).filter(([u]) => u.kind !== 'brand');
+  const colB = `<div><div class="row" style="margin-bottom:8px"><b>Brands</b><button class="btn sm sp" data-act="unitAdd" data-c="${cid}" data-k="brand">+ Brand</button></div><div class="tree">${brands.map(([u, d]) => row(u, d)).join('') || '<p class="muted" style="margin:0">No brands.</p>'}</div></div>`;
+  const colR = `<div><div class="row" style="margin-bottom:8px"><b>Regions and areas</b><button class="btn sm sp" data-act="unitAdd" data-c="${cid}" data-k="region">+ Region</button></div><div class="tree">${regs.map(([u, d]) => row(u, d)).join('') || '<p class="muted" style="margin:0">No regions.</p>'}</div></div>`;
+  if (which) return `<div class="panel"><p class="hint" style="margin-top:0">${which === 'brand' ? 'Optional. A site can carry several brands; a brand manager sees every site carrying the brand.' : 'Optional. A regional or area manager sees every site in their region or area, whatever the brand.'}</p>${which === 'brand' ? colB : colR}</div>`;
   return `<div class="panel"><div class="sect"><div><h3>Brands and regions</h3><p class="hint">Both optional and independent. A regional manager sees every brand's sites in their region; a brand manager sees the brand's sites in every region.</p></div></div>
   <div class="g2"><div><div class="row" style="margin-bottom:8px"><b>Brands</b><button class="btn sm sp" data-act="unitAdd" data-c="${cid}" data-k="brand">+ Brand</button></div><div class="tree">${brands.map(([u, d]) => row(u, d)).join('') || '<p class="muted" style="margin:0">No brands.</p>'}</div></div>
   <div><div class="row" style="margin-bottom:8px"><b>Regions and areas</b><button class="btn sm sp" data-act="unitAdd" data-c="${cid}" data-k="region">+ Region</button></div><div class="tree">${regs.map(([u, d]) => row(u, d)).join('') || '<p class="muted" style="margin:0">No regions.</p>'}</div></div></div></div>`;
@@ -238,15 +278,18 @@ export function adminView(r) {
     { k: 'team', href: 'team', icon: 'team', label: 'Team and administrators' },
   ];
   if (CO()) {
-    const keep = { dash: 1, ras: 1, compliance: 1, topics: 1, actions: 1, signoffs: 1 };
-    nav.splice(0, nav.length, ...nav.filter((n) => keep[n.k]));
-    nav.splice(1, 0, { k: 'clients', href: 'client/' + myCo(), icon: 'clients', label: 'Sites and staff', c: rows('sites').length });
+    // Company administrators: Dashboard, Sites, Risk assessments, Compliance centre, Actions, People, Sign-offs, Settings.
+    const by = Object.fromEntries(nav.map((n) => [n.k, n])), pend = pendingSites(myCo()).length;
+    nav.splice(0, nav.length, by.dash, { k: 'sites', href: 'sites', icon: 'site', label: 'Sites', c: pend ? pend + ' pending' : '' }, by.ras, by.compliance, by.actions,
+      { k: 'people', href: 'people', icon: 'team', label: 'People' }, by.signoffs, { k: 'settings', href: 'settings', icon: 'gear', label: 'Settings' });
   }
   let active = 'dash', title = 'Dashboard', body;
-  if (CO() && ['clients', 'hazards', 'controls', 'team'].includes(p0)) { active = 'clients'; title = 'Sites and staff'; body = vClient(myCo()); }
+  if (CO() && ['sites', 'clients', 'client', 'hazards', 'controls', 'team'].includes(p0)) { active = 'sites'; title = 'Sites'; body = `<div class="page">${sitesPanel(myCo())}</div>`; }
+  else if (CO() && p0 === 'people') { active = 'people'; title = 'People'; body = `<div class="page">${peoplePanel(myCo())}</div>`; }
+  else if (CO() && p0 === 'settings') { active = 'settings'; title = 'Settings'; body = vCoSettings(p1); }
   else if (p0 === 'clients') { active = 'clients'; title = 'Organisations'; body = vClients(); }
-  else if (p0 === 'client') { active = 'clients'; title = 'Organisation'; body = vClient(p1); }
-  else if (p0 === 'site') { active = 'clients'; title = 'Site'; body = vSite(p1, p2); }
+  else if (p0 === 'client') { active = 'clients'; title = 'Organisation'; body = vClient(p1, p2); }
+  else if (p0 === 'site') { active = CO() ? 'sites' : 'clients'; title = 'Site'; body = vSite(p1, p2); }
   else if (p0 === 'ras') { active = 'ras'; title = 'Risk assessments'; body = vRAs(); }
   else if (p0 === 'ra') { active = 'ras'; title = 'Risk assessment'; body = vRA(p1, p2 || 'details'); }
   else if (p0 === 'compliance') { active = 'compliance'; title = 'Compliance centre'; body = ccView(r, CO() ? { admin: false, base: 'compliance', siteDetails: true } : { admin: true, base: 'compliance', clientName: cName, clientFilter: S.ccClient, siteDetails: true }); }
@@ -279,7 +322,8 @@ function vDash() {
     [rows('acknowledgements').filter((a) => a.acknowledged_at >= month).length, 'Sign-offs in last 30 days'], [cc.Expired, 'Certificates expired', 1], [cc['Due soon'], 'Certificates due in 30 days', 1], [lowF.length, 'Food hygiene 2 or below', 1]];
   const st1 = `<div class="stats">${st.map(([n, l, al]) => `<div class="stat${al && n ? ' alert' : ''}"><span>${l}</span><b>${n}</b></div>`).join('')}</div>`;
   if (!rows('clients').length) return `<div class="page">${st1}${empty('Start by onboarding a client', 'Add the client\'s head office and sites, then create risk assessments for them from your hazard and control registers.', '<button class="btn pri" data-act="onboard">+ Onboard a client</button>')}</div>`;
-  return `<div class="page"><div class="sect"><div><h2>Risk overview</h2><p class="muted" style="margin:4px 0 0">${CO() ? 'Your sites, highest risks' : 'Every client, their highest risks'} and what needs doing next.</p></div><div class="row">${CO() ? '' : '<button class="btn" data-act="onboard">+ Onboard client</button>'}<button class="btn pri" data-act="newRA">+ Create risk assessment</button></div></div>${st1}
+  const pend = CO() ? pendingSites(myCo()).length : 0;
+  return `<div class="page">${pend ? `<a class="pwbar" href="#/sites" style="margin:0 0 16px;text-decoration:none;color:inherit"><span><b>${pend} site${pend > 1 ? 's need' : ' needs'} a site manager.</b> Appoint a manager to open ${pend > 1 ? 'them' : 'it'}; records stay available meanwhile.</span><span class="btn sm pri">Appoint managers</span></a>` : ''}<div class="sect"><div><h2>Risk overview</h2><p class="muted" style="margin:4px 0 0">${CO() ? 'Your sites, highest risks' : 'Every client, their highest risks'} and what needs doing next.</p></div><div class="row">${CO() ? '' : '<button class="btn" data-act="onboard">+ Onboard client</button>'}<button class="btn pri" data-act="newRA">+ Create risk assessment</button></div></div>${st1}
   <div class="g2" style="margin-bottom:18px"><div class="panel"><h3 style="font-size:16px;margin-bottom:8px">Highest risk ratings</h3>${hi.length ? hi.map((a) => `<a class="li" href="#/ra/${a.id}/rating">${chip(scoreOf(a, 'res') || scoreOf(a, 'init'), true)}<span><b>${esc(a.title || 'Untitled')}</b><br><span class="muted">${esc(cName(a.client_id))} · ${esc(sName(a.site_id))}${scoreOf(a, 'res') ? '' : ' · not rated with controls'}</span></span></a>`).join('') : '<p class="muted">Nothing rated yet.</p>'}</div>
   <div class="panel"><h3 style="font-size:16px;margin-bottom:8px">Needs attention</h3>${od.slice(0, 5).map((x) => `<a class="li" href="${x.assessment_id ? `#/ra/${x.assessment_id}/actions` : '#/actions'}"><span class="tag bad">Overdue</span><span><b>${esc(x.title || 'Untitled action')}</b><br><span class="muted">Due ${fd(x.due_date)} · ${esc(x.owner || 'No owner')} · ${esc(cName(actClient(x)))}${x.assessment_id ? '' : ' · ' + esc(sName(x.site_id))}</span></span></a>`).join('')}
   ${due.slice(0, 4).map((a) => `<a class="li" href="#/ra/${a.id}/details"><span class="tag warn">Renewal</span><span><b>${esc(a.title || 'Untitled')}</b><br><span class="muted">${a.review_date < today() ? 'Was due' : 'Due'} ${fd(a.review_date)} · ${esc(cName(a.client_id))}</span></span></a>`).join('')}
@@ -296,7 +340,7 @@ function vClients() {
   return `<div class="page"><div class="sect"><h2>Organisations</h2><button class="btn pri" data-act="onboard">+ Add organisation</button></div>
   ${cs.length ? `<div class="tw"><table class="stack"><thead><tr><th>Organisation</th><th>Sites</th><th>Legal entities</th><th>Risk assessments</th><th>Portal users</th><th>Open actions</th></tr></thead><tbody>${cs.map((c) => {
     const ras = rows('assessments').filter((a) => a.client_id === c.id);
-    return `<tr class="click" data-go="client/${c.id}"><td data-l="Organisation"><b>${esc(c.name)}</b><br><span class="muted">${esc(c.contact_name || '')}</span></td><td data-l="Sites">${liveSites(c.id).length}</td><td data-l="Legal entities">${entities(c.id).map((e) => esc(e.name)).join(', ') || '—'}</td><td data-l="Risk assessments">${ras.length}</td><td data-l="Portal users">${rows('portal_invites').filter((i) => i.client_id === c.id).length}</td><td data-l="Open actions">${rows('actions').filter((x) => x.status !== 'Done' && actClient(x) === c.id).length}</td></tr>`;
+    return `<tr class="click" data-go="client/${c.id}"><td data-l="Organisation"><b>${esc(c.name)}</b>${c.is_test ? ' <span class="tag warn">Test</span>' : ''}<br><span class="muted">${esc(c.contact_name || '')}</span></td><td data-l="Sites">${liveSites(c.id).length}</td><td data-l="Legal entities">${entities(c.id).map((e) => esc(e.name)).join(', ') || '—'}</td><td data-l="Risk assessments">${ras.length}</td><td data-l="Portal users">${rows('portal_invites').filter((i) => i.client_id === c.id).length}</td><td data-l="Open actions">${rows('actions').filter((x) => x.status !== 'Done' && actClient(x) === c.id).length}</td></tr>`;
   }).join('')}</tbody></table></div>` : empty('No organisations yet', 'Add an organisation with its legal entity, sites and company administrator.', '<button class="btn pri" data-act="onboard">+ Add organisation</button>')}</div>`;
 }
 
@@ -331,36 +375,69 @@ async function onboardSave() {
     if (ent) { ent.client_id = c.id; await ins('legal_entities', ent); }
     for (const ln of siteLines) { const [n, ...ad] = ln.split(/\s+[—–-]\s+/); await ins('sites', { client_id: c.id, name: n.trim(), address: ad.join(' - ').trim() || null, legal_entity_id: ent ? ent.id : null }); }
     if (siteLines.length) D.sites = rows('sites').filter((x) => x.client_id !== c.id).concat(await fetchAll('sites', '*', (q) => q.eq('client_id', c.id)));
-    await ins('portal_invites', { email: me, role: 'client_admin', client_id: c.id, full_name: mn || null, job_title: mj || null });
-    toast('Organisation added'); location.hash = '#/client/' + c.id;
+    const inv = { email: me, role: 'client_admin', client_id: c.id, full_name: mn || null, job_title: mj || null };
+    await ins('portal_invites', inv);
+    toast('Organisation added'); location.hash = '#/client/' + c.id; sendInvite(inv.id);
   } catch (e) { /* toast already shown */ }
 }
 
-const ST_TAG = { Open: '', 'Temporarily closed': 'warn', Archived: 'bad' };
+const ST_TAG = { Open: '', 'Pending setup': 'warn', 'Temporarily closed': 'warn', Archived: 'bad' };
+const pendingNote = (cid) => { const n = pendingSites(cid).length; return n ? `<p class="hint" style="margin:0 0 10px"><span class="tag warn">Action needed</span> ${n} site${n > 1 ? 's are' : ' is'} <b>Pending setup</b>: appoint a site manager to open ${n > 1 ? 'them' : 'it'}. Records stay available meanwhile.</p>` : ''; };
 const siteStatus = (s) => { const v = s.status || 'Open'; return v === 'Open' ? '' : `<span class="tag ${ST_TAG[v]}">${esc(v)}</span>`; };
 function sitesPanel(cid) {
   const all = clientSites(cid), arch = all.filter((x) => !isOpen(x)), list = S.showArch[cid] ? all : all.filter(isOpen), grp = units(cid).length;
-  return `<div class="panel"><div class="sect"><div><h3>Sites</h3><p class="hint">The physical premises. Certificates, risk assessments and actions belong to a site.</p></div><div class="row">${arch.length ? `<button class="btn sm ghost" data-act="archTog" data-c="${cid}">${S.showArch[cid] ? 'Hide' : 'Show'} ${arch.length} archived</button>` : ''}<a class="btn sm pri" href="#/site/new/${cid}">+ Add site</a></div></div>
-  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Address</th><th>Legal entity</th>${grp ? '<th>Brands</th><th>Region</th>' : ''}<th>Food hygiene</th><th></th></tr></thead><tbody>${list.map((x) => `<tr class="click" data-go="site/${x.id}"><td data-l="Site"><b>${esc(x.name)}</b> ${siteStatus(x)}${x.trading_name ? `<br><span class="muted">Trading as ${esc(x.trading_name)}</span>` : ''}</td><td data-l="Address">${esc(x.address || '—')}</td><td data-l="Legal entity">${esc(entName(x.legal_entity_id) || '—')}</td>${grp ? `<td data-l="Brands">${siteBrands(x.id).map((b) => `<span class="tag k-brand">${esc(uName(b))}</span>`).join(' ') || '—'}</td><td data-l="Region">${esc(uName(x.region_id) || '—')}</td>` : ''}<td data-l="Food hygiene">${fhrsChip(x)}</td><td><a class="btn sm" href="#/site/${x.id}">Open</a></td></tr>`).join('')}</tbody></table></div>`
+  return `<div class="panel"><div class="sect"><div><h3>Sites</h3><p class="hint">The physical premises. Certificates, risk assessments and actions belong to a site.</p></div><div class="row">${arch.length ? `<button class="btn sm ghost" data-act="archTog" data-c="${cid}">${S.showArch[cid] ? 'Hide' : 'Show'} ${arch.length} archived</button>` : ''}${CO() ? '' : `<a class="btn sm pri" href="#/site/new/${cid}">+ Add site</a>`}</div></div>${pendingNote(cid)}
+  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Address</th><th>Legal entity</th><th>Site managers</th>${grp ? '<th>Brands</th><th>Region</th>' : ''}<th>Food hygiene</th><th></th></tr></thead><tbody>${list.map((x) => `<tr class="click" data-go="site/${x.id}"><td data-l="Site"><b>${esc(x.name)}</b> ${siteStatus(x)}${x.trading_name ? `<br><span class="muted">Trading as ${esc(x.trading_name)}</span>` : ''}</td><td data-l="Address">${esc(x.address || '—')}</td><td data-l="Legal entity">${esc(entName(x.legal_entity_id) || '—')}</td><td data-l="Site managers">${siteMgrs(x.id).map((i) => esc(i.full_name || i.email)).join(', ') || (isOpen(x) ? '<span class="tag warn">None</span>' : '—')}</td>${grp ? `<td data-l="Brands">${siteBrands(x.id).map((b) => `<span class="tag k-brand">${esc(uName(b))}</span>`).join(' ') || '—'}</td><td data-l="Region">${esc(uName(x.region_id) || '—')}</td>` : ''}<td data-l="Food hygiene">${fhrsChip(x)}</td><td><a class="btn sm" href="#/site/${x.id}">Open</a></td></tr>`).join('')}</tbody></table></div>`
     : '<p class="muted" style="margin:0">No sites yet. Add the first premises.</p>'}</div>`;
 }
 
-function vClient(id) {
+// ---------- organisation profile (tabs) ----------
+const ORG_TABS = [['overview', 'Overview'], ['sites', 'Sites'], ['entities', 'Legal entities'], ['structure', 'Brands and regions'], ['people', 'People'], ['settings', 'Settings']];
+function vClient(id, tab = 'overview') {
   const c = byId('clients', id); if (!c) return `<div class="page">${empty('Organisation not found', '')}</div>`;
-  const ras = rows('assessments').filter((a) => a.client_id === id), inv = rows('portal_invites').filter((i) => i.client_id === id);
-  const joined = (email) => rows('profiles').some((p) => p.email === email);
-  const portal = location.origin + location.pathname, canP = PEOPLE_OK(), secs = c.sectors || [];
-  return `<div class="page">${CO() ? '' : '<a class="btn sm ghost" href="#/clients">← All organisations</a>'}
-  <div class="sect" style="margin-top:8px"><h2>${esc(c.name)}</h2><div class="row"><button class="btn" data-act="newRA" data-client="${id}">+ Create risk assessment</button>${CO() ? '' : `<button class="btn teal" data-act="openAs" data-id="${id}">Open as company</button>`}${SUPER() ? `<button class="btn dng" data-act="delClient" data-id="${id}">Delete organisation</button>` : ''}</div></div>
-  <div class="panel"><h3 style="font-size:16px;margin-bottom:12px">Organisation details</h3><div class="g2">${field(`clients|${id}|name`, c.name, 'Organisation name')}${field(`clients|${id}|contact_name`, c.contact_name, 'Main contact')}${field(`clients|${id}|contact_email`, c.contact_email, 'Contact email', 'email')}${field(`clients|${id}|phone`, c.phone, 'Phone')}${area(`clients|${id}|address`, c.address, 'Correspondence address (not a site)')}${area(`clients|${id}|notes`, c.notes, 'Notes')}</div></div>
-  ${sitesPanel(id)}
-  ${entityPanel(id)}
-  ${structurePanel(id)}
-  <div class="panel"><h3 style="font-size:16px;margin-bottom:4px">Sectors</h3><p class="hint" style="margin:0 0 8px">${CO() ? 'Set by Safetybiz. The topic library shows topics for these sectors and General topics.' : 'The company administrator sees topic library topics for these sectors, plus General topics.'}</p>
-  <div class="row">${CO() ? (secs.map((x) => `<span class="tag">${esc(x)}</span>`).join('') || '<span class="muted">None set</span>') : SECTORS().concat(secs.filter((x) => !SECTORS().includes(x))).map((x) => `<button class="chipbtn${secs.includes(x) ? ' on' : ''}" data-act="secTog" data-id="${id}" data-v="${esc(x)}">${secs.includes(x) ? '✓ ' : ''}${esc(x)}</button>`).join('')}</div></div>
-  <div class="panel"><div class="sect"><div><h3>Company administrators, managers and staff</h3><p class="hint">${canP ? '' : '<b>The company administrator adds the company\'s managers and staff.</b> '}Company administrators run the whole organisation. Regional and area managers see the sites in their region or brand: they close actions, upload certificates, record sign-offs and add staff. Staff see their site and sign. Portal address: <b>${esc(portal)}</b> <button class="btn sm" data-act="copy" data-v="${esc(portal)}">Copy</button></p></div>${canP ? `<button class="btn sm pri" data-act="invite" data-client="${id}">+ Add person</button>` : !hasCoAdmin(id) && !CO() ? `<button class="btn sm pri" data-act="invite" data-client="${id}" data-role="client_admin">+ Add company administrator</button>` : ''}</div>
-  ${inv.length ? `<div class="tw"><table class="stack"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Looks after</th><th>Job title</th><th>Status</th><th></th></tr></thead><tbody>${inv.map((i) => `<tr><td data-l="Name">${esc(i.full_name || '—')}</td><td data-l="Email">${esc(i.email)}</td><td data-l="Role">${canP ? sel(`portal_invites|${i.id}|role`, i.role, [['client_admin', 'Company administrator'], ['manager', 'Regional / area manager'], ['staff', 'Staff']], '') : esc(ROLE[i.role] || i.role)}</td><td data-l="Looks after">${!canP ? esc(i.role === 'manager' ? unitPath(i.unit_id) || '—' : i.role === 'client_admin' ? 'Whole organisation' : sName(i.site_id) || 'All sites') : i.role === 'manager' ? sel(`portal_invites|${i.id}|unit_id`, i.unit_id || '', unitOpts(id, '— choose —').slice(1), '') : i.role === 'client_admin' ? '<span class="muted">Whole organisation</span>' : sel(`portal_invites|${i.id}|site_id`, i.site_id || '', [['', 'All sites']].concat(liveSites(id).map((s) => [s.id, s.name])), '')}</td><td data-l="Job title">${esc(i.job_title || '—')}</td><td data-l="Status">${joined(i.email) ? '<span class="tag ok">Joined</span>' : '<span class="tag">Invited</span>'}</td><td>${canP ? `<button class="btn sm ghost" data-act="delInvite" data-id="${i.id}" aria-label="Remove access">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nobody yet. Add the company administrator first; they add their own managers and staff.</p>'}</div>
-  <div class="panel"><div class="sect"><h3>Risk assessments</h3></div>${ras.length ? raTable(ras) : '<p class="muted">None yet.</p>'}</div></div>`;
+  if (!ORG_TABS.some(([k]) => k === tab)) tab = 'overview';
+  const body = { overview: orgOverview, sites: sitesPanel, entities: entityPanel, structure: (x) => structurePanel(x), people: peoplePanel, settings: orgSettings }[tab](id);
+  return `<div class="page"><a class="btn sm ghost" href="#/clients">← All organisations</a>
+  <div class="sect" style="margin-top:8px"><h2>${esc(c.name)}${c.is_test ? ' <span class="tag warn">Test</span>' : ''}</h2><div class="row"><button class="btn" data-act="newRA" data-client="${id}">+ Create risk assessment</button><button class="btn teal" data-act="openAs" data-id="${id}">Open as company</button></div></div>
+  <nav class="tabs" style="margin:0 0 16px">${ORG_TABS.map(([k, l]) => `<a href="#/client/${id}/${k}" class="${tab === k ? 'on' : ''}">${l}</a>`).join('')}</nav>${body}</div>`;
+}
+function orgOverview(id) {
+  const c = byId('clients', id), all = clientSites(id), live = all.filter(isOpen), ids = live.map((x) => x.id), cc = ccTotals(ids);
+  const ras = rows('assessments').filter((a) => a.client_id === id), acts = rows('actions').filter((x) => x.status !== 'Done' && actClient(x) === id);
+  const tile = (n, l, href, al) => `<a class="stat${al && n ? ' alert' : ''}" href="${href}" style="text-decoration:none;color:inherit"><span>${l}</span><b>${n}</b></a>`;
+  return `${pendingNote(id)}<div class="stats">${tile(live.length, 'Sites', `#/client/${id}/sites`)}${tile(pendingSites(id).length, 'Pending setup', `#/client/${id}/sites`, 1)}${tile(entities(id).length, 'Legal entities', `#/client/${id}/entities`)}${tile(rows('portal_invites').filter((i) => i.client_id === id).length, 'People', `#/client/${id}/people`)}${tile(ras.filter((a) => !a.is_master).length, 'Risk assessments', '#/ras')}${tile(cc.Expired, 'Certificates expired', '#/compliance', 1)}${tile(cc['Due soon'], 'Certificates due in 30 days', '#/compliance', 1)}${tile(acts.length, 'Open actions', '#/actions')}</div>
+  <div class="panel"><h3 style="font-size:16px;margin-bottom:8px">Main contact</h3><p style="margin:0">${esc(c.contact_name || '—')}${c.contact_email ? ' · ' + esc(c.contact_email) : ''}${c.phone ? ' · ' + esc(c.phone) : ''}</p>${c.address ? `<p class="muted" style="margin:6px 0 0">${esc(c.address)}</p>` : ''}<p class="hint" style="margin:8px 0 0">Edit under <a href="#/client/${id}/settings">Settings</a>.</p></div>
+  <div class="panel"><div class="sect"><h3>Risk assessments</h3></div>${ras.length ? raTable(ras) : '<p class="muted">None yet.</p>'}</div>`;
+}
+function detailsPanel(id) {
+  const c = byId('clients', id);
+  return `<div class="panel"><h3 style="font-size:16px;margin-bottom:12px">Organisation details</h3><div class="g2">${field(`clients|${id}|name`, c.name, 'Organisation name')}${field(`clients|${id}|contact_name`, c.contact_name, 'Main contact')}${field(`clients|${id}|contact_email`, c.contact_email, 'Contact email', 'email')}${field(`clients|${id}|phone`, c.phone, 'Phone')}${area(`clients|${id}|address`, c.address, 'Correspondence address (not a site)')}${area(`clients|${id}|notes`, c.notes, 'Notes')}</div></div>`;
+}
+function sectorsPanel(id) {
+  const secs = byId('clients', id).sectors || [];
+  return `<div class="panel"><h3 style="font-size:16px;margin-bottom:4px">Sectors</h3><p class="hint" style="margin:0 0 8px">${CO() ? 'Set by Safetybiz. The topic library shows topics for these sectors and General topics.' : 'The company administrator sees topic library topics for these sectors, plus General topics.'}</p>
+  <div class="row">${CO() ? (secs.map((x) => `<span class="tag">${esc(x)}</span>`).join('') || '<span class="muted">None set</span>') : SECTORS().concat(secs.filter((x) => !SECTORS().includes(x))).map((x) => `<button class="chipbtn${secs.includes(x) ? ' on' : ''}" data-act="secTog" data-id="${id}" data-v="${esc(x)}">${secs.includes(x) ? '✓ ' : ''}${esc(x)}</button>`).join('')}</div></div>`;
+}
+function orgSettings(id) {
+  const c = byId('clients', id);
+  return `${detailsPanel(id)}${sectorsPanel(id)}${SUPER() ? `<div class="panel"><h3 style="font-size:16px;margin-bottom:4px">Test organisation</h3><p class="hint" style="margin:0 0 10px">${c.is_test ? '<span class="tag warn">Test organisation</span> Marked by a superadmin as test data. Only test organisations can be deleted.' : 'Mark an organisation as test data to allow a superadmin to delete it permanently. Never mark a real client.'}</p><div class="row"><button class="btn" data-act="testTog" data-id="${id}">${c.is_test ? 'Unmark test' : 'Mark as test'}</button>${c.is_test ? `<button class="btn dng" data-act="delClient" data-id="${id}">Delete test organisation</button>` : ''}</div></div>` : ''}`;
+}
+// Company administrator's Settings: organisation details, legal entities, brands, regions and areas.
+const CO_SET = [['details', 'Organisation details'], ['entities', 'Legal entities'], ['brands', 'Brands'], ['regions', 'Regions and areas']];
+function vCoSettings(tab) {
+  const id = myCo(); if (!CO_SET.some(([k]) => k === tab)) tab = 'details';
+  const body = { details: (x) => detailsPanel(x) + sectorsPanel(x), entities: entityPanel, brands: (x) => structurePanel(x, 'brand'), regions: (x) => structurePanel(x, 'region') }[tab](id);
+  return `<div class="page"><nav class="tabs" style="margin:0 0 16px">${CO_SET.map(([k, l]) => `<a href="#/settings/${k}" class="${tab === k ? 'on' : ''}">${l}</a>`).join('')}</nav>${body}</div>`;
+}
+// People: company administrators, managers (sites and/or brand, region or area) and staff.
+function peoplePanel(id) {
+  const inv = rows('portal_invites').filter((i) => i.client_id === id).sort((a, b) => (a.full_name || a.email).localeCompare(b.full_name || b.email));
+  const portal = location.origin + location.pathname, canP = PEOPLE_OK();
+  const looks = (i) => i.role === 'client_admin' ? 'Whole organisation' : i.role === 'manager' ? [mgrSiteIds(i.id).map(sName).filter(Boolean).join(', '), unitPath(i.unit_id)].filter(Boolean).join(' · ') || '<span class="tag warn">Nothing assigned</span>' : esc(sName(i.site_id) || 'All sites');
+  return `<div class="panel"><div class="sect"><div><h3>Company administrators, managers and staff</h3><p class="hint">${canP ? '' : '<b>The company administrator adds the company\'s managers and staff.</b> '}Company administrators run the whole organisation. Site managers look after their sites (and any brand, region or area given to them): they close actions, upload certificates, record sign-offs and add staff. Staff see their site and sign. New people get an invitation email. Portal address: <b>${esc(portal)}</b> <button class="btn sm" data-act="copy" data-v="${esc(portal)}">Copy</button></p></div>${canP ? `<button class="btn sm pri" data-act="invite" data-client="${id}">+ Add person</button>` : !hasCoAdmin(id) && !CO() ? `<button class="btn sm pri" data-act="invite" data-client="${id}" data-role="client_admin">+ Add company administrator</button>` : ''}</div>
+  ${inv.length ? `<div class="tw"><table class="stack"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Looks after</th><th>Job title</th><th>Status</th><th></th></tr></thead><tbody>${inv.map((i) => { const j = joinedEmail(i.email); return `<tr><td data-l="Name">${esc(i.full_name || '—')}</td><td data-l="Email">${esc(i.email)}</td><td data-l="Role">${canP ? sel(`portal_invites|${i.id}|role`, i.role, [['client_admin', 'Company administrator'], ['manager', 'Site manager'], ['staff', 'Staff']], '') : esc(ROLE[i.role] || i.role)}</td>
+  <td data-l="Looks after">${i.role === 'manager' ? `${looks(i)}${canP ? ` <button class="btn sm ghost" data-act="mgrEdit" data-id="${i.id}">Change</button>` : ''}` : i.role === 'client_admin' || !canP ? looks(i) : sel(`portal_invites|${i.id}|site_id`, i.site_id || '', [['', 'All sites']].concat(liveSites(id).map((x) => [x.id, x.name])), '')}</td><td data-l="Job title">${esc(i.job_title || '—')}</td><td data-l="Status">${j ? '<span class="tag ok">Joined</span>' : '<span class="tag">Invited</span>'}</td>
+  <td><div class="row" style="flex-wrap:nowrap">${canP || !CO() ? `<button class="btn sm ghost" data-act="reinvite" data-id="${i.id}">${j ? 'Send sign-in link' : 'Send invitation'}</button>` : ''}${SUPER() && j ? `<button class="btn sm ghost" data-act="pwReset" data-email="${esc(i.email)}">Reset password</button>` : ''}${canP ? `<button class="btn sm ghost" data-act="delInvite" data-id="${i.id}" aria-label="Remove access">Remove</button>` : ''}</div></td></tr>`; }).join('')}</tbody></table></div>` : '<p class="muted">Nobody yet. Add the company administrator first; they add their own managers and staff.</p>'}</div>`;
 }
 
 // ---------- site page ----------
@@ -371,13 +448,14 @@ const SF_KEYS = ['name', 'trading_name', 'address', 'legal_entity_id', 'business
 function vSite(id, cidNew) {
   const isNew = id === 'new', s = isNew ? null : byId('sites', id), cid = isNew ? (CO() ? myCo() : cidNew) : s?.client_id;
   if (!isNew && !s) return `<div class="page">${empty('Site not found', '')}</div>`;
-  if (!S.sf || S.sf._id !== id) S.sf = { _id: id, client_id: cid, brands: isNew ? [] : siteBrands(id), ...Object.fromEntries(SF_KEYS.map((k) => [k, (s && s[k]) || (k === 'status' ? 'Open' : '')])) };
+  if (isNew && CO()) return `<div class="page">${empty('Sites are set up by Safetybiz', 'To add a new site, contact Safetybiz. You can appoint its manager once it is set up.', '<a class="btn" href="#/sites">Back to sites</a>')}</div>`;
+  if (!S.sf || S.sf._id !== id) S.sf = { _id: id, client_id: cid, brands: isNew ? [] : siteBrands(id), ...Object.fromEntries(SF_KEYS.map((k) => [k, (s && s[k]) || (k === 'status' ? 'Pending setup' : '')])) };
   const f = S.sf, inp = (k, lbl, type = 'text', cls = '') => `<label${cls}>${lbl}<input id="sf-${k}" data-sf="${k}" type="${type}" value="${esc(f[k])}"></label>`;
   const ents = entities(cid), brands = brandsOf(cid), regs = regionOpts(cid);
   const openA = isNew ? [] : rows('actions').filter((x) => x.status !== 'Done' && actSite(x) === id), odA = openA.filter(isOd), c = isNew ? null : ccTotals([id]);
   const ras = isNew ? [] : rows('assessments').filter((a) => a.site_id === id).sort((a, b) => (a.title || '').localeCompare(b.title || ''));
   const tile = (n, l, href, al) => `<a class="stat${al && n ? ' alert' : ''}" href="${href}" style="text-decoration:none;color:inherit"><span>${l}</span><b>${n}</b></a>`;
-  return `<div class="page"><a class="btn sm ghost" href="#/client/${cid}">← ${esc(cName(cid))}</a>
+  return `<div class="page"><a class="btn sm ghost" href="${CO() ? '#/sites' : `#/client/${cid}/sites`}">← ${CO() ? 'Sites' : esc(cName(cid))}</a>
   <div class="sect" style="margin-top:8px"><div><h2>${isNew ? 'Add a site' : esc(s.name)} ${isNew ? '' : siteStatus(s)}</h2>${isNew ? '' : `<p class="hint">${esc(s.address || 'No address recorded')}</p>`}</div>${isNew ? '' : `<div class="row"><a class="btn" href="#/compliance/${id}">Certificates</a></div>`}</div>
   ${isNew ? '' : `<div class="stats">${tile(c.Valid, 'Certificates valid', `#/compliance/${id}`)}${tile(c['Due soon'], 'Due in 30 days', `#/compliance/${id}`, 1)}${tile(c.Expired, 'Expired', `#/compliance/${id}`, 1)}${tile(c.Missing, 'Missing', `#/compliance/${id}`, 1)}${tile(openA.length, 'Open actions', '#/actions')}${tile(odA.length, 'Overdue actions', '#/actions', 1)}</div>`}
   <div class="panel"><h3 style="font-size:16px;margin-bottom:12px">Site details</h3><div class="g2">
@@ -385,20 +463,28 @@ function vSite(id, cidNew) {
   <label class="full">Physical address<textarea id="sf-address" data-sf="address" style="min-height:52px">${esc(f.address)}</textarea></label>
   <label>Legal entity<select id="sf-legal_entity_id" data-sf="legal_entity_id"><option value="">Not set</option>${ents.map((e) => `<option value="${e.id}"${f.legal_entity_id === e.id ? ' selected' : ''}>${esc(e.name)} — ${entLine(e)}</option>`).join('')}<option value="__new">+ Add a legal entity…</option></select></label>
   ${inp('business_activity', 'Business activity', 'text')}
-  ${inp('site_contact', 'Site manager')}${inp('contact_email', 'Site manager email', 'email')}${inp('phone', 'Phone')}
-  <label>Status<select id="sf-status" data-sf="status">${['Open', 'Temporarily closed', 'Archived'].map((v) => `<option${f.status === v ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+  ${inp('site_contact', 'Site contact (day to day)')}${inp('contact_email', 'Site contact email', 'email')}${inp('phone', 'Phone')}
+  <label>Status<select id="sf-status" data-sf="status">${['Pending setup', 'Open', 'Temporarily closed', 'Archived'].map((v) => `<option${f.status === v ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
   ${brands.length ? `<div class="full"><label>Brands at this site (optional, any number)</label><div class="row" style="margin-top:6px">${brands.map((b) => `<label class="chk" style="border:1px solid var(--line);border-radius:20px;padding:5px 11px"><input type="checkbox" data-sf="brand" value="${b.id}"${f.brands.includes(b.id) ? ' checked' : ''}> ${esc(b.name)}</label>`).join('')}</div></div>` : ''}
   ${regs.length > 1 ? `<label>Region (optional)<select id="sf-region_id" data-sf="region_id">${regs.map(([v, t]) => `<option value="${v}"${f.region_id === v ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></label>` : ''}
   </div>${f.status === 'Archived' ? '<p class="hint">Archived: hidden from lists, pickers and totals. Its certificates, assessments, sign-offs and actions stay readable.</p>' : ''}
   <div class="row" style="margin-top:14px"><button class="btn pri" data-act="siteSave">${isNew ? 'Add site' : 'Save changes'}</button>${isNew ? '' : '<button class="btn ghost" data-act="siteReset">Discard changes</button>'}${!isNew && !CO() && !hasHistory(id) ? `<button class="btn dng sp" data-act="delSite" data-id="${id}">Delete site</button>` : ''}</div>${!isNew && hasHistory(id) && f.status !== 'Archived' ? '<p class="hint">This site has compliance records. To close it, set Status to Archived: it is hidden from lists and totals and its records are kept.</p>' : ''}</div>
+  ${isNew ? '<p class="hint">New sites start as <b>Pending setup</b> and open when a site manager is appointed.</p>' : siteMgrPanel(s)}
   ${isNew ? '' : `<div class="panel"><div class="sect"><h3>Risk assessments at this site</h3><a class="btn sm" href="#/ras">All risk assessments</a></div>${ras.length ? ras.map((a) => `<a class="li" href="#/ra/${a.id}/details">${statusTag(a.status)}<span style="flex:1"><b>${esc(a.title || 'Untitled')}</b><br><span class="muted">${a.published_version ? 'Published v' + a.published_version : 'Not published'} · renewal ${fd(a.review_date)}${a.master_id ? ' · from a master' : ''}</span></span></a>`).join('') : '<p class="muted" style="margin:0">None yet.</p>'}</div>
   <div class="panel"><h3 style="font-size:16px;margin-bottom:8px">Food hygiene rating</h3>${fhrsChip(s)} <a class="btn sm" href="#/compliance/${id}">Manage on the certificates page</a></div>`}</div>`;
 }
+function siteMgrPanel(s) {
+  const ms = siteMgrs(s.id), avail = rows('portal_invites').filter((i) => i.client_id === s.client_id && i.role === 'manager' && !ms.includes(i));
+  return `<div class="panel"><div class="sect"><div><h3>Site managers</h3><p class="hint">Every open site needs at least one manager with a user account. A manager can look after several sites.</p></div></div>
+  ${s.status === 'Pending setup' ? '<p style="margin:0 0 10px"><span class="tag warn">Pending setup</span> Appoint a manager to open this site. Its records stay available meanwhile.</p>' : ''}
+  ${ms.map((i) => `<div class="li"><span style="flex:1"><b>${esc(i.full_name || i.email)}</b><br><span class="muted">${esc(i.email)}${joinedEmail(i.email) ? '' : ' · invited, not signed in yet'}</span></span><button class="btn sm ghost" data-act="smDel" data-s="${s.id}" data-i="${i.id}">Remove</button></div>`).join('') || '<p class="muted" style="margin:0">No manager yet.</p>'}
+  <div class="row" style="margin-top:12px">${avail.length ? `<select id="sm-add" style="width:auto;max-width:280px">${avail.map((i) => `<option value="${i.id}">${esc(i.full_name || i.email)}</option>`).join('')}</select><button class="btn sm" data-act="smAdd" data-s="${s.id}">Assign</button>` : ''}${PEOPLE_OK() ? `<button class="btn sm pri" data-act="invite" data-client="${s.client_id}" data-role="manager" data-site="${s.id}">+ New manager</button>` : ''}</div></div>`;
+}
 async function siteSave() {
   const f = S.sf, name = (f.name || '').trim(); if (!name) return toast('Enter the site name', true);
-  if (f.contact_email && !/^\S+@\S+\.\S+$/.test(f.contact_email)) return toast('Enter a valid site manager email', true);
+  if (f.contact_email && !/^\S+@\S+\.\S+$/.test(f.contact_email)) return toast('Enter a valid site contact email', true);
   const row = Object.fromEntries(SF_KEYS.map((k) => [k, typeof f[k] === 'string' ? f[k].trim() || null : f[k] || null]));
-  row.name = name; row.status = f.status || 'Open';
+  row.name = name; row.status = f.status || 'Pending setup';
   try {
     let id = f._id;
     if (id === 'new') { row.client_id = f.client_id; await ins('sites', row); id = row.id; }
@@ -411,16 +497,31 @@ async function siteSave() {
     if (f._id === 'new') location.hash = '#/site/' + id; else window.__render();
   } catch (e) { toast(niceError(e), true); }
 }
-function inviteModal(clientId, role = 'staff') {
+function inviteModal(clientId, role = 'staff', siteId = '') {
   const sites = liveSites(clientId);
   openModal(`<h3>Add a person — ${esc(cName(clientId))}</h3><div class="g2"><label>Full name<input id="iv-n"></label><label>Email<input id="iv-e" type="email"></label><label>Job title<input id="iv-j"></label>
-  <label>Role<select id="iv-r"><option value="client_admin"${role === 'client_admin' ? ' selected' : ''}>Company administrator — runs the whole organisation</option>${PEOPLE_OK() ? `<option value="manager">Regional / area manager — the sites in their region or brand</option><option value="staff"${role === 'staff' ? ' selected' : ''}>Staff — reads and signs</option>` : ''}</select></label>
-  <label class="full" id="iv-sl">Site<select id="iv-s"><option value="">— Choose their site —</option>${sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}<option value="all">All sites</option></select></label>
-  <label class="full" id="iv-ul" style="display:none">Looks after<select id="iv-u">${unitOpts(clientId).slice(1).map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('')}</select>${units(clientId).length ? '' : '<span class="hint">Add a brand or region on the organisation page first.</span>'}</label></div>
-  <p class="hint">They sign in at the portal address with this email and get a one-time sign-in link. No password needed.</p>
-  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="inviteSave" data-client="${clientId}">Add user</button></div>`);
-  const sync = () => { const m = $('#iv-r').value; $('#iv-ul').style.display = m === 'manager' ? '' : 'none'; $('#iv-sl').style.display = m === 'staff' ? '' : 'none'; };
+  <label>Role<select id="iv-r"><option value="client_admin"${role === 'client_admin' ? ' selected' : ''}>Company administrator — runs the whole organisation</option>${PEOPLE_OK() ? `<option value="manager"${role === 'manager' ? ' selected' : ''}>Site manager — their sites, brand, region or area</option><option value="staff"${role === 'staff' ? ' selected' : ''}>Staff — reads and signs</option>` : ''}</select></label>
+  <label class="full" id="iv-sl">Site<select id="iv-s"><option value="">— Choose their site —</option>${sites.map((x) => `<option value="${x.id}"${x.id === siteId ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}<option value="all">All sites</option></select></label>
+  <div class="full" id="iv-ml" style="display:none"><label>Sites they manage</label><div class="row" style="margin-top:6px" id="iv-ms">${sites.map((x) => `<label class="chk" style="border:1px solid var(--line);border-radius:20px;padding:5px 11px"><input type="checkbox" value="${x.id}"${x.id === siteId ? ' checked' : ''}> ${esc(x.name)}${x.status === 'Pending setup' ? ' <span class="muted">(pending)</span>' : ''}</label>`).join('') || '<span class="muted">No sites yet.</span>'}</div>
+  ${units(clientId).length ? `<label style="margin-top:10px">Also looks after a brand, region or area (optional)<select id="iv-u"><option value="">— None —</option>${unitOpts(clientId).slice(1).map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('')}</select></label>` : ''}</div></div>
+  <p class="hint">They get an invitation email. They can sign in with an email link, and set a password if they want one.</p>
+  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="inviteSave" data-client="${clientId}">Add and send invitation</button></div>`);
+  const sync = () => { const m = $('#iv-r').value; $('#iv-ml').style.display = m === 'manager' ? '' : 'none'; $('#iv-sl').style.display = m === 'staff' ? '' : 'none'; };
   $('#iv-r').onchange = sync; sync();
+}
+// Change which sites (and brand, region or area) a manager looks after.
+function mgrEditModal(iid) {
+  const i = byId('portal_invites', iid), cid = i.client_id, have = new Set(mgrSiteIds(iid));
+  openModal(`<h3>${esc(i.full_name || i.email)} — what they look after</h3><label>Sites they manage</label><div class="row" style="margin:6px 0 12px" id="me-ms">${liveSites(cid).map((x) => `<label class="chk" style="border:1px solid var(--line);border-radius:20px;padding:5px 11px"><input type="checkbox" value="${x.id}"${have.has(x.id) ? ' checked' : ''}> ${esc(x.name)}</label>`).join('')}</div>
+  ${units(cid).length ? `<label>Brand, region or area (optional)<select id="me-u"><option value="">— None —</option>${unitOpts(cid).slice(1).map(([v, t]) => `<option value="${v}"${i.unit_id === v ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></label>` : ''}
+  <p class="hint">Removing the last manager from an open site returns it to Pending setup.</p>
+  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="mgrEditSave" data-id="${iid}">Save</button></div>`);
+}
+async function setMgrSites(iid, want) {
+  const have = mgrSiteIds(iid), touched = [...new Set([...have, ...want])];
+  for (const sid of have.filter((x) => !want.includes(x))) { await queue(() => sb.from('site_managers').delete().eq('site_id', sid).eq('invite_id', iid)); D.site_managers = rows('site_managers').filter((m) => !(m.site_id === sid && m.invite_id === iid)); }
+  for (const sid of want.filter((x) => !have.includes(x))) { const r = { site_id: sid, invite_id: iid }; await queue(() => sb.from('site_managers').insert(r)); rows('site_managers').push(r); }
+  if (touched.length) await refreshSites(touched);
 }
 
 // ---------- assessments ----------
@@ -809,7 +910,7 @@ async function fetchSigsFor(ids) {
 function vTeam() {
   const admins = rows('profiles').filter((p) => p.role === 'admin'), pending = rows('portal_invites').filter((i) => i.role === 'admin' && !admins.some((p) => p.email === i.email));
   const access = (sup) => (sup ? '<span class="tag ok">Superadmin</span>' : '<span class="tag">Administrator</span>');
-  const btns = (email, sup, self) => (SUPER() && !self ? `<div class="row" style="flex-wrap:nowrap"><button class="btn sm" data-act="superToggle" data-email="${esc(email)}" data-v="${sup ? '' : '1'}">${sup ? 'Make administrator' : 'Make superadmin'}</button><button class="btn sm ghost" data-act="adminRemove" data-email="${esc(email)}">Remove</button></div>` : '');
+  const btns = (email, sup, self) => (SUPER() && !self ? `<div class="row" style="flex-wrap:nowrap"><button class="btn sm" data-act="superToggle" data-email="${esc(email)}" data-v="${sup ? '' : '1'}">${sup ? 'Make administrator' : 'Make superadmin'}</button><button class="btn sm ghost" data-act="pwReset" data-email="${esc(email)}">Reset password</button><button class="btn sm ghost" data-act="adminRemove" data-email="${esc(email)}">Remove</button></div>` : '');
   return `<div class="page"><div class="sect"><div><h2>Safetybiz administrators</h2><p class="hint">Administrators work across every client: onboarding, risk assessments, registers, publishing and sign-off records. <b>Superadmins</b> can also add and remove administrators, delete clients and edit the topic library.</p></div>${SUPER() ? '<button class="btn pri" data-act="adminInvite">+ Add administrator</button>' : ''}</div>
   <div class="tw"><table class="stack"><thead><tr><th>Name</th><th>Email</th><th>Access</th><th>Status</th><th></th></tr></thead><tbody>${admins.map((p) => `<tr><td data-l="Name"><b>${esc(p.full_name || '—')}</b>${p.id === S.me.id ? ' <span class="muted">(you)</span>' : ''}</td><td data-l="Email">${esc(p.email)}</td><td data-l="Access">${access(p.is_super)}</td><td data-l="Status"><span class="tag ok">Active</span></td><td>${btns(p.email, p.is_super, p.id === S.me.id)}</td></tr>`).join('')}
   ${pending.map((i) => `<tr><td data-l="Name">${esc(i.full_name || '—')}</td><td data-l="Email">${esc(i.email)}</td><td data-l="Access">${access(i.is_super)}</td><td data-l="Status"><span class="tag">Invited</span></td><td>${btns(i.email, i.is_super, false)}</td></tr>`).join('')}</tbody></table></div>
@@ -927,9 +1028,20 @@ export async function adminClick(e, b) {
     case 'copy': try { await navigator.clipboard.writeText(d.v); toast('Copied'); } catch { toast('Copy failed', true); } return;
     case 'onboard': return onboardModal();
     case 'onboardSave': return onboardSave();
-    case 'delSite': { const cid = byId('sites', d.id)?.client_id; if (await confirmBox('Delete this site? Only a site with no records can be deleted — archive it instead (Status → Archived) to keep its history.', 'Delete')) { try { await del('sites', d.id); S.sf = null; location.hash = '#/client/' + cid; } catch (e) { /* shown */ } } return; }
-    case 'delClient': if (await confirmBox('Delete this client, its sites and portal users? Clients with risk assessments cannot be deleted.')) { del('clients', d.id).then(() => (location.hash = '#/clients')).catch(() => {}); } return;
-    case 'invite': return inviteModal(d.client || a?.client_id, d.role || (PEOPLE_OK() ? 'staff' : 'client_admin'));
+    case 'delSite': { const cid = byId('sites', d.id)?.client_id; if (await confirmBox('Delete this site? Only a site with no records can be deleted — archive it instead (Status → Archived) to keep its history.', 'Delete')) { try { await del('sites', d.id); S.sf = null; location.hash = '#/client/' + cid + '/sites'; } catch (e) { /* shown */ } } return; }
+    case 'delClient': return orgDeleteModal(d.id);
+    case 'delClientGo': return orgDelete(d.id, b);
+    case 'testTog': { const c = byId('clients', d.id); if (!c || !SUPER()) return;
+      if (!c.is_test && !(await confirmBox(`Mark ${c.name} as a test organisation? A superadmin can then delete it and all its records permanently. Never mark a real client.`, 'Mark as test'))) return;
+      await upd('clients', c.id, { is_test: !c.is_test }).catch(() => {}); return window.__render(); }
+    case 'invite': return inviteModal(d.client || a?.client_id, d.role || (PEOPLE_OK() ? 'staff' : 'client_admin'), d.site || '');
+    case 'reinvite': return sendInvite(d.id);
+    case 'pwReset': if (SUPER() && (await confirmBox(`Email ${d.email} a link to choose a new password?`, 'Send reset email'))) await sendReset(d.email); return;
+    case 'smAdd': { const iid = $('#sm-add')?.value; if (!iid) return; try { await setMgrSites(iid, [...new Set([...mgrSiteIds(iid), d.s])]); toast('Site manager assigned'); } catch (er) { toast(niceError(er), true); } return window.__render(); }
+    case 'smDel': if (await confirmBox('Remove this manager from the site? If it is the last manager, an open site returns to Pending setup.', 'Remove')) { try { await setMgrSites(d.i, mgrSiteIds(d.i).filter((x) => x !== d.s)); } catch (er) { toast(niceError(er), true); } window.__render(); } return;
+    case 'mgrEdit': return mgrEditModal(d.id);
+    case 'mgrEditSave': { const want = [...document.querySelectorAll('#me-ms input:checked')].map((x) => x.value), u = $('#me-u') ? $('#me-u').value || null : byId('portal_invites', d.id).unit_id;
+      closeModal(); try { if (u !== byId('portal_invites', d.id).unit_id) await upd('portal_invites', d.id, { unit_id: u }); await setMgrSites(d.id, want); toast('Saved'); } catch (er) { toast(niceError(er), true); } return window.__render(); }
     case 'chSearch': return chSearch(d.ctx, b);
     case 'chPick': return chPick(d.ctx, d.n, b);
     case 'leAdd': return leModal(d.c, null, false);
@@ -944,11 +1056,13 @@ export async function adminClick(e, b) {
     case 'secTog': { const c = byId('clients', d.id), set = new Set(c.sectors || []); set.has(d.v) ? set.delete(d.v) : set.add(d.v); upd('clients', c.id, { sectors: [...set] }).catch(() => {}); return window.__render(); }
     case 'inviteSave': {
       const email = $('#iv-e').value.trim().toLowerCase(); if (!/^\S+@\S+\.\S+$/.test(email)) return toast('Enter a valid email', true);
-      const role = $('#iv-r').value, unit = $('#iv-u')?.value || null, sv = $('#iv-s').value;
+      const role = $('#iv-r').value, unit = $('#iv-u')?.value || null, sv = $('#iv-s').value, msites = [...document.querySelectorAll('#iv-ms input:checked')].map((x) => x.value);
       if (role === 'staff' && !sv) return toast('Choose their site, or All sites', true);
-      if (role === 'manager' && !unit) return toast('Choose the brand, region or area they look after', true);
+      if (role === 'manager' && !msites.length && !unit) return toast('Choose the sites they manage (or a brand, region or area)', true);
       const row = { email, role, client_id: d.client, site_id: role === 'staff' && sv !== 'all' ? sv : null, unit_id: role === 'manager' ? unit : null, full_name: $('#iv-n').value.trim() || null, job_title: $('#iv-j').value.trim() || null };
-      closeModal(); await ins('portal_invites', row).catch(() => {}); await refreshProfiles(); toast('Added — they sign in at the portal address with their email'); return window.__render();
+      closeModal();
+      try { await ins('portal_invites', row); if (role === 'manager' && msites.length) await setMgrSites(row.id, msites); } catch (er) { await refreshProfiles(); return window.__render(); }
+      await refreshProfiles(); window.__render(); await sendInvite(row.id); return;
     }
     case 'delInvite': if (await confirmBox('Remove this person\'s portal access? Their past sign-offs are kept.', 'Remove access')) { await del('portal_invites', d.id).catch(() => {}); await refreshProfiles(); window.__render(); } return;
     case 'newRA': return newRAModal(d.client, d.topic);
@@ -960,7 +1074,7 @@ export async function adminClick(e, b) {
     case 'syncAll': return syncModal(a);
     case 'syncGo': return syncGo(a, b);
     case 'openAs': S.asCo = d.id; window.__viewAs = true; viewAs(d.id); location.hash = '#/'; return window.__render();
-    case 'exitAs': { const back = S.asCo; S.asCo = null; window.__viewAs = false; $('#root').innerHTML = '<div class="boot"><p>Returning to Safetybiz view…</p></div>'; await loadAdmin(S.me); location.hash = '#/client/' + back; return window.__render(); }
+    case 'exitAs': { const back = S.asCo; S.asCo = null; window.__viewAs = false; $('#root').innerHTML = '<div class="boot"><p>Returning to Safetybiz view…</p></div>'; await loadAdmin(S.me); location.hash = '#/client/' + back + '/overview'; return window.__render(); }
     case 'unitAdd': { const k = d.k, base = 'New ' + KIND[k].toLowerCase(), taken = new Set(units(d.c).filter((u) => u.kind === k && (u.parent_id || null) === (d.p || null)).map((u) => u.name.trim().toLowerCase()));
       let nm = base, n = 2; while (taken.has(nm.toLowerCase())) nm = `${base} ${n++}`;
       const row = { client_id: d.c, parent_id: d.p || null, kind: k, name: nm, sort: units(d.c).length };
@@ -1092,10 +1206,10 @@ export function adminField(el, isChange) {
   if (t === 'assessments') patch.updated_at = nowIso();
   if (t === 'portal_invites' && f === 'role') {
     const inv = byId('portal_invites', id);
-    if (v === 'manager') { const u = units(inv.client_id)[0]; if (!u) { toast('Add a brand, region or area on the company page first', true); window.__render(); return false; } Object.assign(patch, { unit_id: inv.unit_id || u.id, site_id: null }); }
-    else patch.unit_id = null;
+    if (v === 'manager') { Object.assign(patch, { unit_id: inv.unit_id || null, site_id: null }); setTimeout(() => mgrEditModal(id), 300); }
+    else { patch.unit_id = null; if (inv.role === 'manager') D.site_managers = rows('site_managers').filter((m) => m.invite_id !== id); }
   }
-  if (t === 'portal_invites') { upd(t, id, patch).then(refreshProfiles).then(() => window.__render()).catch(() => {}); return false; }
+  if (t === 'portal_invites') { upd(t, id, patch).then(refreshProfiles).then(() => refreshSites(rows('sites').filter((x) => x.client_id === byId('portal_invites', id)?.client_id).map((x) => x.id))).then(() => window.__render()).catch(() => {}); return false; }
   const sendPatch = { ...patch }; delete sendPatch.updated_at;
   const r = byId(t, id); if (r && t === 'assessments') r.updated_at = patch.updated_at;
   upd(t, id, sendPatch, isChange ? 0 : 700).catch(() => {});
