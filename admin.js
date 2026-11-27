@@ -6,6 +6,7 @@ import {
 } from './core.js';
 import { assessmentPDF, signOffsPDF, ctlScore, pct } from './pdf.js';
 import { ccView, ccClick, ccTotals, ccAttention, fhrsChip, fhrsLow, fhrsRefreshStale } from './compliance.js';
+import { svList, svView, svField, svClick, setSvQuery, FORMS } from './services.js';
 
 const S = { me: null, asCo: null, sel: new Set(), ccClient: '', q: '', fClient: '', fStatus: '', af: 'open', draft: null, logs: {}, sigs: {}, hq: '', hcat: '', cq: '', so: {}, tq: '', tsec: '' };
 let route = [];
@@ -17,25 +18,26 @@ const myCo = () => S.asCo || S.me.client_id;
 
 // ---------- load ----------
 export async function loadAdmin(me) {
-  S.me = me;
+  S.me = me; window.__me = me;
   const ackCols = 'id,assessment_id,version,user_id,email,full_name,job_title,method,site_id,statement,acknowledged_at';
-  const [clients, sites, invites, profiles, hreg, creg, hrc, ras, hz, ctl, acts, audits, pubs, acks, topics, thz, tct, cdt, sdocs, fhist, units] = await Promise.all([
+  const [clients, sites, invites, profiles, hreg, creg, hrc, ras, hz, ctl, acts, audits, pubs, acks, topics, thz, tct, cdt, sdocs, fhist, units, svjobs] = await Promise.all([
     fetchAll('clients'), fetchAll('sites'), fetchAll('portal_invites'), fetchAll('profiles'), fetchAll('hazard_register'), fetchAll('control_register'),
     fetchAll('hazard_register_controls'), fetchAll('assessments'), fetchAll('assessment_hazards'), fetchAll('assessment_controls'), fetchAll('actions'),
     fetchAll('audits'), fetchAll('published_assessments', 'id,assessment_id,client_id,site_id,version,note,published_at,published_by'), fetchAll('acknowledgements', ackCols),
     fetchAll('topic_library'), fetchAll('topic_hazards'), fetchAll('topic_controls'), fetchAll('compliance_doc_types'), fetchAll('site_documents'),
-    fetchAll('site_fhrs_history'), fetchAll('org_units'),
+    fetchAll('site_fhrs_history'), fetchAll('org_units'), fetchAll('service_jobs'),
   ]);
   Object.assign(D, { clients, sites, portal_invites: invites, profiles, hazard_register: hreg, control_register: creg, hazard_register_controls: hrc, assessments: ras,
-    assessment_hazards: hz, assessment_controls: ctl, actions: acts, audits, published_assessments: pubs, acknowledgements: acks, topic_library: topics, topic_hazards: thz, topic_controls: tct, compliance_doc_types: cdt, site_documents: sdocs, site_fhrs_history: fhist, org_units: units });
+    assessment_hazards: hz, assessment_controls: ctl, actions: acts, audits, published_assessments: pubs, acknowledgements: acks, topic_library: topics, topic_hazards: thz, topic_controls: tct, compliance_doc_types: cdt, site_documents: sdocs, site_fhrs_history: fhist, org_units: units, service_jobs: svjobs });
   if (S.asCo) viewAs(S.asCo);
 }
 // Keep only one company's records in memory (Open as company).
 function viewAs(cid) {
   const raIds = new Set(rows('assessments').filter((a) => a.client_id === cid).map((a) => a.id));
-  const byClient = ['clients', 'sites', 'org_units', 'portal_invites', 'assessments', 'published_assessments', 'site_documents', 'site_fhrs_history'];
+  const byClient = ['clients', 'sites', 'org_units', 'portal_invites', 'assessments', 'published_assessments', 'site_documents', 'site_fhrs_history', 'service_jobs'];
   byClient.forEach((t) => (D[t] = rows(t).filter((r) => (t === 'clients' ? r.id : r.client_id) === cid)));
-  ['assessment_hazards', 'assessment_controls', 'actions', 'audits', 'acknowledgements'].forEach((t) => (D[t] = rows(t).filter((r) => raIds.has(r.assessment_id))));
+  ['assessment_hazards', 'assessment_controls', 'actions', 'audits', 'acknowledgements'].forEach((t) => (D[t] = rows(t).filter((r) => raIds.has(r.assessment_id) || (t === 'actions' && r.site_id && byId('sites', r.site_id)))));
+  D.service_jobs = rows('service_jobs').filter((j) => j.status === 'Issued');
   D.profiles = rows('profiles').filter((p) => p.client_id === cid || p.id === S.me.id);
   S.sel.clear(); S.fClient = ''; S.so = {};
 }
@@ -55,6 +57,12 @@ const newRef = () => 'RA-' + today().replace(/-/g, '').slice(2) + '-' + uid().re
 const ratingLine = (a) => `${chip(scoreOf(a, 'res'), true)}<div class="muted" style="font-size:12px">with ${raCtl(a.id).length} controls</div>`;
 const pubTag = (a) => (a.published_version ? `<span class="tag ok">Published v${a.published_version}</span>` : '<span class="tag">Not published</span>');
 const statusTag = (s) => `<span class="tag${s === 'Active' ? ' ok' : s === 'Under review' ? ' warn' : ''}">${esc(s)}</span>`;
+// An action belongs to a risk assessment, or to a site (a defect from a service visit).
+const actA = (x) => byId('assessments', x.assessment_id);
+const actClient = (x) => actA(x)?.client_id || byId('sites', x.site_id)?.client_id;
+const actSite = (x) => actA(x)?.site_id || x.site_id;
+const actFrom = (x) => { const a = actA(x), j = x.service_job_id && byId('service_jobs', x.service_job_id);
+  return a ? `<a href="#/ra/${x.assessment_id}/actions">${esc(a.title || '')}</a>` : j ? `<a href="#/service/${j.id}">${esc(FORMS[j.type].short)} · ${esc(j.cert_no)}</a>` : x.service_job_id ? 'Service visit defect' : ''; };
 const empty = (h, p, btn = '') => `<div class="empty"><h3>${h}</h3><p class="muted">${p}</p>${btn}</div>`;
 
 // ---------- company structure (brand → region → area → site) ----------
@@ -97,6 +105,7 @@ export function adminView(r) {
     { k: 'clients', href: 'clients', icon: 'clients', label: 'Clients and sites', c: rows('clients').length },
     { k: 'ras', href: 'ras', icon: 'ra', label: 'Risk assessments', c: live().length },
     { k: 'compliance', href: 'compliance', icon: 'cert', label: 'Compliance centre', c: (() => { const t = ccTotals(rows('sites').map((x) => x.id)); return t.Expired + t['Due soon'] || ''; })() },
+    { k: 'services', href: 'services', icon: 'svc', label: 'Service jobs', c: rows('service_jobs').filter((j) => j.status === 'Draft').length || '' },
     { k: 'topics', href: 'topics', icon: 'lib', label: 'Topic library', c: rows('topic_library').filter((t) => t.active).length },
     { k: 'hazards', href: 'hazards', icon: 'hz', label: 'Hazard register' },
     { k: 'controls', href: 'controls', icon: 'ctl', label: 'Control register' },
@@ -116,6 +125,8 @@ export function adminView(r) {
   else if (p0 === 'ras') { active = 'ras'; title = 'Risk assessments'; body = vRAs(); }
   else if (p0 === 'ra') { active = 'ras'; title = 'Risk assessment'; body = vRA(p1, p2 || 'details'); }
   else if (p0 === 'compliance') { active = 'compliance'; title = 'Compliance centre'; body = ccView(r, CO() ? { admin: false, base: 'compliance' } : { admin: true, base: 'compliance', clientName: cName, clientFilter: S.ccClient }); }
+  else if (p0 === 'services' && !CO()) { active = 'services'; title = 'Service jobs'; body = svList(); }
+  else if (p0 === 'service') { active = CO() ? 'compliance' : 'services'; title = 'Service job'; body = svView(p1); }
   else if (p0 === 'topics') { active = 'topics'; title = 'Topic library'; body = vTopics(); }
   else if (p0 === 'hazards') { active = 'hazards'; title = 'Hazard register'; body = vHazReg(); }
   else if (p0 === 'controls') { active = 'controls'; title = 'Control register'; body = vCtlReg(); }
@@ -143,7 +154,7 @@ function vDash() {
   if (!rows('clients').length) return `<div class="page">${st1}${empty('Start by onboarding a client', 'Add the client\'s head office and sites, then create risk assessments for them from your hazard and control registers.', '<button class="btn pri" data-act="onboard">+ Onboard a client</button>')}</div>`;
   return `<div class="page"><div class="sect"><div><h2>Risk overview</h2><p class="muted" style="margin:4px 0 0">${CO() ? 'Your sites, highest risks' : 'Every client, their highest risks'} and what needs doing next.</p></div><div class="row">${CO() ? '' : '<button class="btn" data-act="onboard">+ Onboard client</button>'}<button class="btn pri" data-act="newRA">+ Create risk assessment</button></div></div>${st1}
   <div class="g2" style="margin-bottom:18px"><div class="panel"><h3 style="font-size:16px;margin-bottom:8px">Highest risk ratings</h3>${hi.length ? hi.map((a) => `<a class="li" href="#/ra/${a.id}/rating">${chip(scoreOf(a, 'res') || scoreOf(a, 'init'), true)}<span><b>${esc(a.title || 'Untitled')}</b><br><span class="muted">${esc(cName(a.client_id))} · ${esc(sName(a.site_id))}${scoreOf(a, 'res') ? '' : ' · not rated with controls'}</span></span></a>`).join('') : '<p class="muted">Nothing rated yet.</p>'}</div>
-  <div class="panel"><h3 style="font-size:16px;margin-bottom:8px">Needs attention</h3>${od.slice(0, 5).map((x) => { const a = byId('assessments', x.assessment_id); return `<a class="li" href="#/ra/${x.assessment_id}/actions"><span class="tag bad">Overdue</span><span><b>${esc(x.title || 'Untitled action')}</b><br><span class="muted">Due ${fd(x.due_date)} · ${esc(x.owner || 'No owner')} · ${esc(cName(a?.client_id))}</span></span></a>`; }).join('')}
+  <div class="panel"><h3 style="font-size:16px;margin-bottom:8px">Needs attention</h3>${od.slice(0, 5).map((x) => `<a class="li" href="${x.assessment_id ? `#/ra/${x.assessment_id}/actions` : '#/actions'}"><span class="tag bad">Overdue</span><span><b>${esc(x.title || 'Untitled action')}</b><br><span class="muted">Due ${fd(x.due_date)} · ${esc(x.owner || 'No owner')} · ${esc(cName(actClient(x)))}${x.assessment_id ? '' : ' · ' + esc(sName(x.site_id))}</span></span></a>`).join('')}
   ${due.slice(0, 4).map((a) => `<a class="li" href="#/ra/${a.id}/details"><span class="tag warn">Renewal</span><span><b>${esc(a.title || 'Untitled')}</b><br><span class="muted">${a.review_date < today() ? 'Was due' : 'Due'} ${fd(a.review_date)} · ${esc(cName(a.client_id))}</span></span></a>`).join('')}
   ${L.filter((a) => !a.published_version && a.status === 'Active').slice(0, 3).map((a) => `<a class="li" href="#/ra/${a.id}/publish"><span class="tag">Unpublished</span><span><b>${esc(a.title || 'Untitled')}</b><br><span class="muted">Active but ${CO() ? 'staff' : 'the client'} can't see it yet</span></span></a>`).join('')}
   ${ccAtt.map(({ sid, t, d, s: st }) => { const site = byId('sites', sid); return `<a class="li" href="#/compliance/${sid}"><span class="tag ${st === 'Expired' ? 'bad' : 'warn'}">${st === 'Expired' ? 'Expired' : 'Due soon'}</span><span><b>${esc(t.name)}</b><br><span class="muted">${esc(cName(site?.client_id))} · ${esc(site?.name)} · ${fd(d.expiry_date)}</span></span></a>`; }).join('')}
@@ -545,10 +556,10 @@ function ctlEditModal(id) {
 
 // ---------- actions / sign-offs / team ----------
 function vActions() {
-  const f = S.af, list = rows('actions').filter((x) => (f === 'all' || (f === 'open' && x.status !== 'Done') || (f === 'overdue' && isOd(x)) || (f === 'done' && x.status === 'Done')) && (!S.fClient || byId('assessments', x.assessment_id)?.client_id === S.fClient))
+  const f = S.af, list = rows('actions').filter((x) => (f === 'all' || (f === 'open' && x.status !== 'Done') || (f === 'overdue' && isOd(x)) || (f === 'done' && x.status === 'Done')) && (!S.fClient || actClient(x) === S.fClient))
     .sort((x, y) => (x.status === 'Done') - (y.status === 'Done') || String(x.due_date || '9').localeCompare(String(y.due_date || '9')));
   return `<div class="page"><div class="sect"><h2>Actions</h2><div class="row"><select id="af-c" data-ui="fClient" style="width:auto"><option value="">All clients</option>${rows('clients').map((c) => `<option value="${c.id}"${S.fClient === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select><div class="seg">${[['open', 'Open'], ['overdue', 'Overdue'], ['done', 'Done'], ['all', 'All']].map(([k, l]) => `<button class="${f === k ? 'on' : ''}" data-act="af" data-v="${k}">${l}</button>`).join('')}</div></div></div>
-  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Action</th><th>Assessment</th><th>Owner</th><th>Due</th><th>Priority</th><th>Status</th></tr></thead><tbody>${list.map((x) => { const a = byId('assessments', x.assessment_id); return `<tr class="${isOd(x) ? 'od' : ''}"><td data-l="Action"><b>${esc(x.title || 'Untitled')}</b></td><td data-l="Assessment"><a href="#/ra/${x.assessment_id}/actions">${esc(a?.title || '')}</a><br><span class="muted">${esc(cName(a?.client_id))} · ${esc(sName(a?.site_id))}</span></td><td data-l="Owner">${esc(x.owner || '—')}</td><td data-l="Due" class="${isOd(x) ? 'od-t' : ''}">${fd(x.due_date)}</td><td data-l="Priority">${esc(x.priority)}</td><td data-l="Status">${sel(`actions|${x.id}|status`, x.status, ASTAT, '')}</td></tr>`; }).join('')}</tbody></table></div>` : empty('No actions here', 'Actions are raised inside each risk assessment.', '')}</div>`;
+  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Action</th><th>From</th><th>Owner</th><th>Due</th><th>Priority</th><th>Status</th></tr></thead><tbody>${list.map((x) => `<tr class="${isOd(x) ? 'od' : ''}"><td data-l="Action"><b>${esc(x.title || 'Untitled')}</b>${x.severity ? `<br><span class="muted">${esc(x.severity)} severity · ${esc(x.timescale || '')}</span>` : ''}</td><td data-l="From">${actFrom(x)}<br><span class="muted">${esc(cName(actClient(x)))} · ${esc(sName(actSite(x)))}</span></td><td data-l="Owner">${esc(x.owner || '—')}</td><td data-l="Due" class="${isOd(x) ? 'od-t' : ''}">${fd(x.due_date)}</td><td data-l="Priority">${esc(x.priority)}</td><td data-l="Status">${sel(`actions|${x.id}|status`, x.status, ASTAT, '')}</td></tr>`).join('')}</tbody></table></div>` : empty('No actions here', 'Actions are raised inside risk assessments and from defects found on service visits.', '')}</div>`;
 }
 function filteredAcks() {
   const f = S.so;
@@ -676,6 +687,7 @@ async function copySave(ids, btn) {
 export async function adminClick(e, b) {
   const d = b.dataset, aid = route[0] === 'ra' ? route[1] : null, a = aid && byId('assessments', aid);
   if (d.act && d.act.startsWith('cc') && (await ccClick(d, b))) return;
+  if (d.act && d.act.startsWith('sv') && (await svClick(d, b))) return;
   switch (d.act) {
     case 'close': return closeModal();
     case 'copy': try { await navigator.clipboard.writeText(d.v); toast('Copied'); } catch { toast('Copy failed', true); } return;
@@ -807,6 +819,8 @@ async function exportRA(a) {
 
 // field edits: data-b="table|id|field"
 export function adminField(el, isChange) {
+  if (el.dataset.sj) return svField(el, isChange);
+  if (el.dataset.ui === 'svq') { setSvQuery(el.value); return true; }
   if (el.dataset.ui) { S[el.dataset.ui] = el.value; return true; }
   if (el.dataset.so) { S.so[el.dataset.so] = el.value; if (el.dataset.so === 'c') { S.so.s = ''; S.so.a = ''; } return true; }
   if (el.dataset.au != null && S.draft) { const k = el.dataset.au; if (k[0] === 'n' && /^n\d+$/.test(k)) S.draft.items[+k.slice(1)].note = el.value; else S.draft[k] = el.value; return false; }
