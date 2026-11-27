@@ -8,6 +8,7 @@ The Safetybiz risk assessment platform and client portal.
 - **Regional and area managers** are linked to a brand, region or area of one company and see only the sites beneath it. They close and raise actions, upload certificates, record sign-offs, update site details and add staff; they do not edit risk assessments.
 - **Client staff** see the assessments for their site, read them and sign. Their home page lists what they need to do.
 - **Brand masters**: one assessment written for a brand, copied to its sites and updated from the master later (each site keeps its own answers and additions).
+- **Service certificates**: Safetybiz engineers complete fire risk assessments, fire alarm, emergency lighting, extinguisher and PAT forms on site, sign, and issue a Safetybiz certificate PDF. It is filed in the site's Compliance centre automatically and every defect becomes an action.
 - **Food hygiene**: each site can be linked to its Food Standards Agency listing to show the live rating.
 - PDF export of full risk assessments (laid out like the familiar printed format) and of sign-off records with signatures.
 
@@ -25,6 +26,7 @@ Security is enforced by the database itself (Postgres row-level security), not b
 | `migration-004-roles-and-copy.sql` | Superadmins, and company administrators who build their own company's assessments. |
 | `migration-005-food-hygiene.sql` | Live Food Standards Agency hygiene rating on each site profile, with rating history. |
 | `migration-006-structure.sql` | Brand → Region → Area structure, regional and area managers, and brand master assessments. |
+| `migration-007-service-jobs.sql` | Service jobs and certificates (fire risk assessment, fire alarm, emergency lighting, extinguishers, PAT); defects become site actions. |
 | `functions/fsa/index.ts` | Edge function `fsa` that looks up food hygiene ratings (deploy with JWT verification on). |
 | `seed.sql` | The Safetybiz starter library: 184 topics, 70 hazards, 317 controls. |
 | `topic-library.csv`, `registers.csv` | The library as spreadsheets, for review. |
@@ -34,7 +36,7 @@ Security is enforced by the database itself (Postgres row-level security), not b
 ### 1. Create the Supabase project
 1. Sign up at [supabase.com](https://supabase.com) and create a new project (choose the London region for UK data).
 2. Open **SQL Editor → New query**, paste the whole of `schema.sql` and press **Run**. If Supabase warns about tables without Row Level Security, choose **Run without RLS**: the script switches it on for every table further down.
-3. New query: paste `hardening.sql` and **Run**. Then do the same with `migration-002-hazard-sections.sql`, `migration-003-compliance-centre.sql`, `migration-004-roles-and-copy.sql`, `migration-005-food-hygiene.sql` and `migration-006-structure.sql`, in that order. Deploy the edge function in `functions/fsa`.
+3. New query: paste `hardening.sql` and **Run**. Then do the same with `migration-002-hazard-sections.sql`, `migration-003-compliance-centre.sql`, `migration-004-roles-and-copy.sql`, `migration-005-food-hygiene.sql`, `migration-006-structure.sql` and `migration-007-service-jobs.sql`, in that order. Deploy the edge function in `functions/fsa`.
 4. New query again: paste `seed.sql` and **Run** to load the Safetybiz library.
 5. Add yourself as the first administrator (new query, change the email and name):
    ```sql
