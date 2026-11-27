@@ -1,9 +1,9 @@
 // Safetybiz One — Supabase Edge Function "companies-house".
 // Looks up UK companies on the Companies House Public Data API so onboarding can fill in the company's details.
-// Only Safetybiz administrators can call it. Needs the secret CH_API_KEY (a free "REST" API key for a live application
+// Safetybiz administrators and company administrators can call it. Needs the secret CH_API_KEY (a free "REST" API key for a live application
 // from https://developer.company-information.service.gov.uk).
 //   { action: "search", q }        -> up to 10 matching companies
-//   { action: "get", number }      -> one company: profile, registered office, SIC codes and current directors
+//   { action: "get", number }      -> one company: profile, registered office and SIC codes (directors: always [])
 //   { action: "ping" }              -> { connected: true } when the API key works (no company data)
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -26,8 +26,6 @@ const title = (s = '') => s.split(/(\s+)/).map((w, i) => {
   if (/^[^AEIOUY]{1,4}$/i.test(u.replace(/[^A-Z]/g, '')) && /[A-Z]/.test(u)) return u;
   return w.toLowerCase().replace(/(^|[-'(&/])([a-z])/g, (m, a, b) => a + b.toUpperCase());
 }).join('');
-// Officer names come as "SURNAME, First Middle".
-const person = (n = '') => { const [s, f] = n.split(', '); return title([f, s].filter(Boolean).join(' ')); };
 
 async function ch(path: string) {
   const key = Deno.env.get('CH_API_KEY');
@@ -47,15 +45,16 @@ Deno.serve(async (req) => {
     // Health check for setup: says whether the API key works, and returns no company data.
     if (b.action === 'ping') { const j = await ch('/search/companies?q=tesco&items_per_page=1'); return reply({ ok: true, data: { connected: !!(j && j.items) } }); }
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: req.headers.get('Authorization') || '' } } });
-    const { data: ok } = await sb.rpc('is_admin');
-    if (ok !== true) return reply({ ok: false, error: 'Only Safetybiz administrators can look up Companies House' });
+    // Safetybiz administrators, and company administrators (for their own organisation's legal entities).
+    const [{ data: adm }, { data: ca }] = await Promise.all([sb.rpc('is_admin'), sb.rpc('is_client_admin')]);
+    if (adm !== true && ca !== true) return reply({ ok: false, error: 'Only Safetybiz and company administrators can look up Companies House' });
     if (b.action === 'get') {
       const n = String(b.number || '').trim().toUpperCase();
       if (!/^[A-Z0-9]{8}$/.test(n)) throw new Error('Enter an 8-character company number');
-      const [p, o] = await Promise.all([ch(`/company/${n}`), ch(`/company/${n}/officers?items_per_page=50&register_type=directors`)]);
+      // Directors are personal data and are no longer fetched or kept (decision 27 Nov 2026).
+      const p = await ch(`/company/${n}`);
       if (!p) return reply({ ok: true, data: null });
-      const directors = ((o && o.items) || []).filter((x: any) => !x.resigned_on && /director/.test(x.officer_role || ''))
-        .map((x: any) => ({ name: person(x.name), role: x.officer_role === 'corporate-director' ? 'Corporate director' : 'Director', appointed: x.appointed_on || null }));
+      const directors: unknown[] = [];
       return reply({ ok: true, data: {
         number: p.company_number, name: title(p.company_name), status: p.company_status, type: p.type,
         incorporated: p.date_of_creation || null, address: addr(p.registered_office_address), sic: p.sic_codes || [], directors,
