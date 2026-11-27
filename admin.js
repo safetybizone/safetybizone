@@ -23,6 +23,71 @@ const hasCoAdmin = (cid) => rows('portal_invites').some((i) => i.client_id === c
 // Topic library sectors a company can be in (General topics are always shown).
 const SECTORS = () => [...new Set(rows('topic_library').map((t) => t.sector))].filter((x) => x && x !== 'General').sort();
 
+// ---------- Companies House ----------
+// Lookups go through the "companies-house" edge function, which holds the API key.
+async function chCall(body) {
+  const { data, error } = await sb.functions.invoke('companies-house', { body });
+  if (error) throw new Error('Companies House lookup is not available right now');
+  if (!data || !data.ok) throw new Error((data && data.error) || 'Companies House lookup failed');
+  return data.data;
+}
+// Suggest topic library sectors from the company's SIC codes (UK SIC 2007).
+const SIC_SECTOR = [[/^0[1-3]/, 'Farming and agriculture'], [/^(1\d|2\d|3[0-3])/, 'Manufacturing'], [/^3[89]/, 'Waste and recycling'], [/^4[1-3]/, 'Construction'],
+  [/^4[57]/, 'Retail'], [/^(49|50|51|53)/, 'Transport and distribution'], [/^52/, 'Warehousing'], [/^55/, 'Hotels'], [/^56/, 'Restaurants, takeaways, pubs and catering'],
+  [/^75/, 'Veterinary'], [/^8130/, 'Horticulture'], [/^(8510|8891)/, 'Childcare and nurseries'], [/^85/, 'Education'], [/^86/, 'Medical and dental'], [/^8[78]/, 'Care'],
+  [/^93/, 'Sport, fitness and leisure'], [/^(6[4-9]|7[0-4]|82)/, 'Commercial']];
+const sicSectors = (codes) => [...new Set((codes || []).map((c) => (SIC_SECTOR.find(([re]) => re.test(c)) || [])[1]).filter((x) => x && SECTORS().includes(x)))];
+const CH_STATUS = { active: 'Active', dissolved: 'Dissolved', liquidation: 'In liquidation', receivership: 'In receivership', administration: 'In administration', 'voluntary-arrangement': 'Voluntary arrangement', 'converted-closed': 'Closed', 'insolvency-proceedings': 'Insolvency proceedings', registered: 'Registered', removed: 'Removed', closed: 'Closed', open: 'Open' };
+const chTag = (st) => `<span class="tag ${st === 'active' ? 'ok' : 'bad'}">${esc(CH_STATUS[st] || st || 'Unknown')}</span>`;
+const chLink = (n) => `https://find-and-update.company-information.service.gov.uk/company/${encodeURIComponent(n)}`;
+const chFields = (d) => ({ company_number: d.number, company_status: d.status || null, company_type: d.type || null, incorporated_on: d.incorporated || null, registered_address: d.address || null, sic_codes: d.sic || [], directors: d.directors || [], ch_checked_at: nowIso() });
+const chSearchBox = (ctx) => `<div class="chfind"><div class="row" style="flex-wrap:nowrap"><input id="chq-${ctx}" data-chq="${ctx}" placeholder="Company name or number, e.g. ZK Group" autocomplete="off"><button class="btn" data-act="chSearch" data-ctx="${ctx}">Search</button></div><div id="chr-${ctx}"></div></div>`;
+// One company's Companies House details (used on the company page and after picking a result at onboarding).
+const chCard = (d) => `<div class="chcard"><div class="row"><b>${esc(d.name)}</b>${chTag(d.status)}<a class="muted" href="${chLink(d.number)}" target="_blank" rel="noopener">Company ${esc(d.number)} ↗</a></div>
+  <div class="g2" style="margin-top:8px"><div><span class="muted">Registered office</span><br>${esc(d.address || '—')}</div><div><span class="muted">Incorporated</span><br>${fd(d.incorporated)}</div>
+  <div><span class="muted">Nature of business (SIC)</span><br>${(d.sic || []).map(esc).join(', ') || '—'}</div><div><span class="muted">Directors</span><br>${(d.directors || []).map((x) => esc(x.name)).join(', ') || '—'}</div></div></div>`;
+document.addEventListener('keydown', (e) => { const q = e.target.dataset && e.target.dataset.chq; if (q && e.key === 'Enter') { e.preventDefault(); document.querySelector(`[data-act=chSearch][data-ctx="${q}"]`)?.click(); } });
+async function chSearch(ctx, btn) {
+  const q = ($(`#chq-${ctx}`)?.value || '').trim(), out = $(`#chr-${ctx}`); if (!out) return;
+  if (q.length < 2) return toast('Type the company name or number', true);
+  btn.disabled = true; out.innerHTML = '<p class="muted" style="margin:8px 0 0">Searching Companies House…</p>';
+  try {
+    const list = await chCall({ action: 'search', q });
+    out.innerHTML = list.length ? `<div class="pick" style="margin-top:8px;max-height:260px">${list.map((x) => `<button class="opt chopt" data-act="chPick" data-ctx="${ctx}" data-n="${esc(x.number)}"><span style="flex:1;text-align:left"><b>${esc(x.name)}</b> ${chTag(x.status)}<br><span class="muted">${esc(x.number)} · ${esc(x.address)}${x.incorporated ? ' · incorporated ' + fd(x.incorporated) : ''}</span></span></button>`).join('')}</div>`
+      : '<p class="muted" style="margin:8px 0 0">No companies found. Try the registered name or the 8-character company number.</p>';
+  } catch (e) { out.innerHTML = `<p class="od-t" style="margin:8px 0 0">${esc(e.message)}</p>`; }
+  btn.disabled = false;
+}
+async function chPick(ctx, num, btn) {
+  const out = $(`#chr-${ctx}`); btn.disabled = true;
+  try {
+    const d = await chCall({ action: 'get', number: num }); if (!d) return toast('Company not found', true);
+    const dupe = rows('clients').find((c) => c.company_number === d.number && c.id !== ctx);
+    if (dupe) { toast(`${dupe.name} is already set up with company number ${d.number}`, true); if (ctx !== 'ob') { btn.disabled = false; return; } }
+    if (ctx === 'ob') {
+      S.chPick = d;
+      $('#ob-name').value = d.name; $('#ob-addr').value = d.address || $('#ob-addr').value;
+      if (!$('#ob-cn').value.trim() && d.directors[0]) $('#ob-cn').value = d.directors[0].name;
+      const sug = sicSectors(d.sic); document.querySelectorAll('#ob-sec input').forEach((i) => { if (sug.includes(i.value)) i.checked = true; });
+      out.innerHTML = chCard(d) + `<p class="hint">Filled in from Companies House${sug.length ? `; sectors suggested from the SIC codes: <b>${sug.map(esc).join(', ')}</b>` : ''}. Check them below.</p>`;
+      if (d.status !== 'active') toast(`Companies House shows this company as ${(CH_STATUS[d.status] || d.status).toLowerCase()}`, true);
+    } else {
+      const c = byId('clients', ctx), patch = chFields(d);
+      if (!c.address && d.address) patch.address = d.address;
+      if (!c.contact_name && d.directors[0]) patch.contact_name = d.directors[0].name;
+      if (!(c.sectors || []).length && sicSectors(d.sic).length) patch.sectors = sicSectors(d.sic);
+      await upd('clients', c.id, patch); toast('Linked to Companies House'); window.__render();
+    }
+  } catch (e) { toast(e.message, true); }
+  btn.disabled = false;
+}
+function chPanel(c) {
+  const linked = !!c.company_number;
+  const d = { name: c.name, number: c.company_number, status: c.company_status, address: c.registered_address, incorporated: c.incorporated_on, sic: c.sic_codes, directors: c.directors };
+  return `<div class="panel"><div class="sect" style="margin-bottom:10px"><div><h3>Companies House</h3>${linked ? `<p class="hint" style="margin-top:2px">Checked ${ft(c.ch_checked_at)}</p>` : ''}</div>${linked && !CO() ? `<div class="row"><button class="btn sm" data-act="chRefresh" data-id="${c.id}">Refresh</button><button class="btn sm ghost" data-act="chUnlink" data-id="${c.id}">Unlink</button></div>` : ''}</div>
+  ${linked ? chCard(d) : CO() ? '<p class="muted" style="margin:0">Not linked yet. Safetybiz links the company to its Companies House record.</p>' : `<p class="hint" style="margin:0 0 8px">Find the company to bring in its registered office, company number, nature of business and directors.</p>${chSearchBox(c.id)}`}</div>`;
+}
+
 // ---------- load ----------
 export async function loadAdmin(me) {
   S.me = me; window.__me = me;
@@ -84,7 +149,7 @@ function unitTree(cid) { const out = []; const walk = (pid, d) => kids(pid, cid)
 const unitDesc = (uid) => { const ids = new Set([uid]); let grew = true; while (grew) { grew = false; rows('org_units').forEach((u) => { if (u.parent_id && ids.has(u.parent_id) && !ids.has(u.id)) { ids.add(u.id); grew = true; } }); } return ids; };
 const unitSites = (uid) => { const ids = unitDesc(uid); return rows('sites').filter((s) => s.unit_id && ids.has(s.unit_id)); };
 const unitPath = (uid) => { const p = []; let u = byId('org_units', uid); while (u) { p.unshift(u.name || KIND[u.kind]); u = byId('org_units', u.parent_id); } return p.join(' › '); };
-const unitOpts = (cid, blank = 'Not grouped') => [['', blank]].concat(unitTree(cid).map(([u, d]) => [u.id, '  '.repeat(d) + (u.name || 'Untitled') + ' (' + KIND[u.kind].toLowerCase() + ')']));
+const unitOpts = (cid, blank = 'Not grouped') => [['', blank]].concat(unitTree(cid).map(([u, d]) => [u.id, '  '.repeat(d) + (u.name || 'Untitled') + ' (' + KIND[u.kind].toLowerCase() + ')']));
 const mgrLabel = (i) => { const u = byId('org_units', i.unit_id); return u ? `${MGR_TITLE[u.kind]} · ${u.name}` : 'Manager'; };
 // Where an assessment lives: a site, or a brand (master).
 const raWhere = (a) => (a.is_master ? `Brand master · ${byId('org_units', a.unit_id)?.name || 'brand'}` : sName(a.site_id));
@@ -184,7 +249,8 @@ function vClients() {
 }
 
 function onboardModal() {
-  openModal(`<h3>Onboard a client</h3><div class="g2">
+  S.chPick = null;
+  openModal(`<h3>Onboard a client</h3><h4 style="margin:0 0 6px">Find on Companies House</h4>${chSearchBox('ob')}<div class="g2" style="margin-top:14px">
   <label class="full">Company name<input id="ob-name" placeholder="e.g. Harbourside Joinery Ltd"></label>
   <label class="full">Head office address<textarea id="ob-addr" style="min-height:60px"></textarea></label>
   <label>Contact name<input id="ob-cn"></label><label>Contact email<input id="ob-ce" type="email"></label><label>Phone<input id="ob-ph"></label></div>
@@ -199,7 +265,8 @@ function onboardModal() {
 async function onboardSave() {
   const name = $('#ob-name').value.trim(); if (!name) return toast('Enter the company name', true);
   const sectors = [...document.querySelectorAll('#ob-sec input:checked')].map((i) => i.value);
-  const c = { id: uid(), name, sectors, address: $('#ob-addr').value.trim() || null, contact_name: $('#ob-cn').value.trim() || null, contact_email: $('#ob-ce').value.trim() || null, phone: $('#ob-ph').value.trim() || null };
+  const ch = S.chPick && S.chPick.name ? chFields(S.chPick) : {};
+  const c = { id: uid(), name, sectors, ...ch, address: $('#ob-addr').value.trim() || null, contact_name: $('#ob-cn').value.trim() || null, contact_email: $('#ob-ce').value.trim() || null, phone: $('#ob-ph').value.trim() || null };
   const siteLines = $('#ob-sites').value || '';
   const mn = $('#ob-mn').value.trim(), me = $('#ob-me').value.trim().toLowerCase(), mj = $('#ob-mj').value.trim();
   if (!mn || !me) return toast('Enter the company administrator\'s name and email', true);
@@ -223,6 +290,7 @@ function vClient(id) {
   return `<div class="page">${CO() ? '' : '<a class="btn sm ghost" href="#/clients">← All clients</a>'}
   <div class="sect" style="margin-top:8px"><h2>${esc(c.name)}</h2><div class="row"><button class="btn" data-act="newRA" data-client="${id}">+ Create risk assessment</button>${CO() ? '' : `<button class="btn teal" data-act="openAs" data-id="${id}">Open as company</button>`}${SUPER() ? `<button class="btn dng" data-act="delClient" data-id="${id}">Delete client</button>` : ''}</div></div>
   <div class="panel"><h3 style="font-size:16px;margin-bottom:12px">Head office and contact</h3><div class="g2">${field(`clients|${id}|name`, c.name, 'Company name')}${field(`clients|${id}|contact_name`, c.contact_name, 'Contact name')}${field(`clients|${id}|contact_email`, c.contact_email, 'Contact email', 'email')}${field(`clients|${id}|phone`, c.phone, 'Phone')}${area(`clients|${id}|notes`, c.notes, 'Notes', ' class="full"')}</div></div>
+  ${chPanel(c)}
   <div class="panel"><h3 style="font-size:16px;margin-bottom:4px">Sectors</h3><p class="hint" style="margin:0 0 8px">${CO() ? 'Set by Safetybiz. The topic library shows topics for these sectors and General topics.' : 'The company administrator sees topic library topics for these sectors, plus General topics.'}</p>
   <div class="row">${CO() ? (secs.map((x) => `<span class="tag">${esc(x)}</span>`).join('') || '<span class="muted">None set</span>') : SECTORS().concat(secs.filter((x) => !SECTORS().includes(x))).map((x) => `<button class="chipbtn${secs.includes(x) ? ' on' : ''}" data-act="secTog" data-id="${id}" data-v="${esc(x)}">${secs.includes(x) ? '✓ ' : ''}${esc(x)}</button>`).join('')}</div></div>
   ${structurePanel(id)}
@@ -739,6 +807,10 @@ export async function adminClick(e, b) {
     case 'delSite': if (await confirmBox('Remove this site? Sites with risk assessments cannot be removed.')) { await del('sites', d.id).catch(() => {}); window.__render(); } return;
     case 'delClient': if (await confirmBox('Delete this client, its sites and portal users? Clients with risk assessments cannot be deleted.')) { del('clients', d.id).then(() => (location.hash = '#/clients')).catch(() => {}); } return;
     case 'invite': return inviteModal(d.client || a?.client_id, d.role || (PEOPLE_OK() ? 'staff' : 'client_admin'));
+    case 'chSearch': return chSearch(d.ctx, b);
+    case 'chPick': return chPick(d.ctx, d.n, b);
+    case 'chRefresh': { b.disabled = true; try { const x = await chCall({ action: 'get', number: byId('clients', d.id).company_number }); if (x) { await upd('clients', d.id, chFields(x)); toast('Updated from Companies House'); } else toast('Companies House no longer has this company number', true); } catch (er) { toast(er.message, true); } return window.__render(); }
+    case 'chUnlink': if (await confirmBox('Unlink this company from its Companies House record? The details shown here are removed; nothing changes at Companies House.', 'Unlink')) { await upd('clients', d.id, { company_number: null, company_status: null, company_type: null, incorporated_on: null, registered_address: null, sic_codes: [], directors: [], ch_checked_at: null }).catch(() => {}); window.__render(); } return;
     case 'secTog': { const c = byId('clients', d.id), set = new Set(c.sectors || []); set.has(d.v) ? set.delete(d.v) : set.add(d.v); upd('clients', c.id, { sectors: [...set] }).catch(() => {}); return window.__render(); }
     case 'inviteSave': {
       const email = $('#iv-e').value.trim().toLowerCase(); if (!/^\S+@\S+\.\S+$/.test(email)) return toast('Enter a valid email', true);
