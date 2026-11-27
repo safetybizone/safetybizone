@@ -227,3 +227,28 @@ table.mini td{padding:5px 8px;font-size:13.5px;border-bottom:1px solid var(--lin
 .todo{display:flex;gap:14px;align-items:center;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--or);border-radius:10px;padding:12px 14px;text-decoration:none;color:inherit;margin-bottom:8px}
 .todo:hover{border-color:var(--or)}.todo.done{border-left-color:var(--mint)}
 .todo .n{flex:none;width:34px;height:34px;border-radius:50%;background:#fff3ec;color:var(--or);display:grid;place-items:center;font-weight:700}
+
+/* service jobs and certificates */
+.svt{display:inline-block;color:#fff;font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
+.svhead{background:var(--card);border-bottom:1px solid var(--line);padding:16px max(3vw,18px)}
+.svhead h2{font-size:clamp(20px,2.6vw,28px)}
+.seg button.on.bad{background:var(--vh)}
+.seg button:disabled{cursor:default}
+.aq .nt input{min-height:34px;padding:4px 8px;font-size:14px}
+table.svreg td{padding:4px 6px}table.svreg input,table.svreg select{min-height:34px;padding:4px 6px;font-size:13.5px;min-width:70px}
+.svfx{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.svfx input,.svfx select{min-height:36px;padding:4px 8px;font-size:14px}
+.svph{display:block;max-width:220px;max-height:160px;border-radius:6px;margin-top:8px;border:1px solid var(--line)}
+.aq .nt textarea{min-height:38px;padding:6px 8px;font-size:14px;resize:vertical}
+.aq.aqno{background:#fff8f6;border-radius:8px;padding:11px 8px;margin:0 -8px}
+.rates{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.rate{border:1.5px solid var(--rc);background:#fff;color:var(--ink);border-radius:20px;padding:4px 11px;font:600 12.5px Inter;cursor:pointer}
+.rate.on{background:var(--rc);color:var(--rt,#fff)}.rate:disabled{cursor:default}
+.ratechip{display:inline-block;background:var(--rc);color:#fff;font-weight:700;font-size:12px;border-radius:20px;padding:2px 10px;white-space:nowrap}
+.svphs{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.svpw{position:relative;display:inline-block}.svpw img{width:96px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:block;background:var(--soft)}
+.svpx{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;border:0;background:var(--ink);color:#fff;font-size:11px;cursor:pointer;line-height:22px;padding:0}
+.svpadd{margin:0;min-height:32px}
+.pq{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--soft);border-radius:10px;padding:10px}
+.pq input{flex:1 1 220px;min-height:46px;font-size:16px}
+.pq .seg button{min-height:44px;padding:0 14px}
+.pq-p{background:#1f7d6d;border-color:#1f7d6d;color:#fff;min-height:46px}.pq-f{background:var(--vh);border-color:var(--vh);color:#fff;min-height:46px}
