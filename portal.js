@@ -5,6 +5,7 @@ import {
 } from './core.js';
 import { assessmentPDF, signOffsPDF, ctlScore, pct } from './pdf.js';
 import { ccView, ccClick, fhrsChip, siteCounts } from './compliance.js';
+import { FORMS } from './services.js';
 
 const S = { me: null, sigs: {}, f: {}, viewed: {} };
 let route = [];
@@ -17,9 +18,9 @@ export async function loadPortal(me) {
   S.me = me;
   const ackCols = 'id,assessment_id,version,user_id,email,full_name,job_title,method,site_id,statement,acknowledged_at';
   const tasks = [fetchAll('clients'), fetchAll('sites'), fetchAll('published_assessments'), fetchAll('actions'), fetchAll('acknowledgements', ackCols)];
-  if (isMgr()) tasks.push(fetchAll('portal_invites'), fetchAll('profiles'), fetchAll('compliance_doc_types'), fetchAll('site_documents'), fetchAll('org_units'), fetchAll('site_fhrs_history'));
-  const [clients, sites, pubs, actions, acks, invites = [], profiles = [], cdt = [], sdocs = [], units = [], fhist = []] = await Promise.all(tasks);
-  Object.assign(D, { clients, sites, published_assessments: pubs, actions, acknowledgements: acks, portal_invites: invites, profiles, compliance_doc_types: cdt, site_documents: sdocs, org_units: units, site_fhrs_history: fhist });
+  if (isMgr()) tasks.push(fetchAll('portal_invites'), fetchAll('profiles'), fetchAll('compliance_doc_types'), fetchAll('site_documents'), fetchAll('org_units'), fetchAll('site_fhrs_history'), fetchAll('service_jobs'));
+  const [clients, sites, pubs, actions, acks, invites = [], profiles = [], cdt = [], sdocs = [], units = [], fhist = [], svjobs = []] = await Promise.all(tasks);
+  Object.assign(D, { clients, sites, published_assessments: pubs, actions, acknowledgements: acks, portal_invites: invites, profiles, compliance_doc_types: cdt, site_documents: sdocs, org_units: units, site_fhrs_history: fhist, service_jobs: svjobs });
 }
 
 // latest published version of each assessment
@@ -67,9 +68,9 @@ function vHome(L) {
   const nTodo = todo.length + myActs.length;
   const todoBlock = `<div class="panel" style="margin-bottom:16px"><h3 style="font-size:17px;margin-bottom:10px">${nTodo ? `What you need to do <span class="muted" style="font-weight:500">(${nTodo})</span>` : 'What you need to do'}</h3>
     ${todo.map((a) => `<a class="todo" href="#/a/${a.id}"><span class="n">✍</span><span style="flex:1"><b>Read and sign: ${esc(a.title || 'Untitled')}</b><br><span class="muted">${esc(sName(a.site_id))} · version ${a.version}${mySigned({ ...a, version: a.version - 1 }) ? ' · updated since you last signed' : ''}</span></span><span class="btn sm pri">Open</span></a>`).join('')}
-    ${myActs.map((x) => { const a = L.find((y) => y.id === x.assessment_id); return `<a class="todo" href="#/a/${x.assessment_id}"><span class="n">!</span><span style="flex:1"><b>${esc(x.title)}</b><br><span class="muted">Action for you${a ? ' · ' + esc(a.title) : ''} · due ${fd(x.due_date)}${isOd(x) ? ' · <b style="color:var(--vh)">overdue</b>' : ''}</span></span></a>`; }).join('')}
+    ${myActs.map((x) => { const a = L.find((y) => y.id === x.assessment_id); return `<a class="todo" href="${x.assessment_id ? '#/a/' + x.assessment_id : '#/compliance/' + x.site_id}"><span class="n">!</span><span style="flex:1"><b>${esc(x.title)}</b><br><span class="muted">Action for you${a ? ' · ' + esc(a.title) : ''} · due ${fd(x.due_date)}${isOd(x) ? ' · <b style="color:var(--vh)">overdue</b>' : ''}</span></span></a>`; }).join('')}
     ${nTodo ? '' : '<div class="todo done"><span class="n" style="background:var(--soft);color:#1f7d6d">✓</span><span><b>You\'re all up to date</b><br><span class="muted">Nothing to sign and no actions waiting for you.</span></span></div>'}</div>`;
-  const siteBlock = isMgr() ? `<div class="panel" style="margin-bottom:16px"><div class="sect" style="margin-bottom:8px"><h3>Your sites</h3><a class="btn sm" href="#/compliance">Compliance centre</a></div><div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Food hygiene</th><th>Certificates</th><th>Open actions</th></tr></thead><tbody>${rows('sites').map((st) => { const c = siteCounts(st.id), oa = rows('actions').filter((x) => x.status !== 'Done' && L.find((a) => a.id === x.assessment_id && a.site_id === st.id)).length;
+  const siteBlock = isMgr() ? `<div class="panel" style="margin-bottom:16px"><div class="sect" style="margin-bottom:8px"><h3>Your sites</h3><a class="btn sm" href="#/compliance">Compliance centre</a></div><div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Food hygiene</th><th>Certificates</th><th>Open actions</th></tr></thead><tbody>${rows('sites').map((st) => { const c = siteCounts(st.id), oa = rows('actions').filter((x) => x.status !== 'Done' && (x.site_id === st.id || L.find((a) => a.id === x.assessment_id && a.site_id === st.id))).length;
     return `<tr class="click" data-go="compliance/${st.id}"><td data-l="Site"><b>${esc(st.name)}</b></td><td data-l="Food hygiene">${fhrsChip(st)}</td><td data-l="Certificates">${c.Expired ? `<span class="tag bad">${c.Expired} expired</span> ` : ''}${c['Due soon'] ? `<span class="tag warn">${c['Due soon']} due soon</span> ` : ''}${c.Missing ? `<span class="tag miss">${c.Missing} missing</span>` : ''}${!c.Expired && !c['Due soon'] && !c.Missing ? '<span class="tag ok">Up to date</span>' : ''}</td><td data-l="Open actions">${oa}</td></tr>`; }).join('')}</tbody></table></div></div>`
     : (() => { const st = byId('sites', S.me.site_id); return st && st.fhrs_id ? `<div class="panel" style="margin-bottom:16px"><span class="muted">Your site</span><br><b>${esc(st.name)}</b> · food hygiene rating ${fhrsChip(st)}</div>` : ''; })();
   return `<div class="page"><div class="sect"><div><h2>Hello${first ? ', ' + esc(first) : ''}</h2><p class="muted" style="margin:4px 0 0">${isMgr() ? `You look after ${rows('sites').length} site${rows('sites').length === 1 ? '' : 's'}.` : nTodo ? 'Here is what needs doing.' : 'You\'re up to date.'}</p></div></div>${stats}${isMgr() ? siteBlock + (todo.length ? todoBlock : '') : todoBlock + siteBlock}
@@ -111,11 +112,11 @@ function vAssessment(id) {
 }
 function vActions() {
   const L = latest(), f = S.f.act || 'open';
-  const list = rows('actions').filter((x) => L.some((a) => a.id === x.assessment_id) && (f === 'all' || (f === 'open' && x.status !== 'Done') || (f === 'overdue' && isOd(x)) || (f === 'done' && x.status === 'Done')))
+  const list = rows('actions').filter((x) => (x.service_job_id || L.some((a) => a.id === x.assessment_id)) && (f === 'all' || (f === 'open' && x.status !== 'Done') || (f === 'overdue' && isOd(x)) || (f === 'done' && x.status === 'Done')))
     .sort((x, y) => (x.status === 'Done') - (y.status === 'Done') || String(x.due_date || '9').localeCompare(String(y.due_date || '9')));
   return `<div class="page"><div class="sect"><h2>Actions</h2><div class="seg">${[['open', 'Open'], ['overdue', 'Overdue'], ['done', 'Done'], ['all', 'All']].map(([k, l]) => `<button class="${f === k ? 'on' : ''}" data-act="actFilter" data-v="${k}">${l}</button>`).join('')}</div></div>
-  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Action</th><th>Site · assessment</th><th>Owner</th><th>Due</th><th>Status</th></tr></thead><tbody>${list.map((x) => { const a = L.find((y) => y.id === x.assessment_id);
-    return `<tr class="${isOd(x) ? 'od' : ''}"><td data-l="Action"><b>${esc(x.title)}</b><br><span class="muted">${esc(x.priority)} priority</span></td><td data-l="Site · assessment">${esc(sName(a.site_id))}<br><a href="#/a/${a.id}">${esc(a.title)}</a></td><td data-l="Owner"><input id="ax-${x.id}-o" data-ax="${x.id}|owner" value="${esc(x.owner || '')}" aria-label="Owner" style="min-width:140px"></td><td data-l="Due" class="${isOd(x) ? 'od-t' : ''}">${fd(x.due_date)}</td>
+  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Action</th><th>Site · from</th><th>Owner</th><th>Due</th><th>Status</th></tr></thead><tbody>${list.map((x) => { const a = L.find((y) => y.id === x.assessment_id), j = x.service_job_id && byId('service_jobs', x.service_job_id);
+    return `<tr class="${isOd(x) ? 'od' : ''}"><td data-l="Action"><b>${esc(x.title)}</b><br><span class="muted">${esc(x.severity ? x.severity + ' severity · ' + (x.timescale || '') : x.priority + ' priority')}</span></td><td data-l="Site · from">${esc(sName(a ? a.site_id : x.site_id))}<br>${a ? `<a href="#/a/${a.id}">${esc(a.title)}</a>` : `<a href="#/compliance/${x.site_id}">${j ? esc(FORMS[j.type].short + ' · ' + j.cert_no) : 'Service visit defect'}</a>`}</td><td data-l="Owner"><input id="ax-${x.id}-o" data-ax="${x.id}|owner" value="${esc(x.owner || '')}" aria-label="Owner" style="min-width:140px"></td><td data-l="Due" class="${isOd(x) ? 'od-t' : ''}">${fd(x.due_date)}</td>
     <td data-l="Status"><select id="ax-${x.id}-s" data-ax="${x.id}|status">${['Open', 'In progress', 'Done'].map((v) => `<option${x.status === v ? ' selected' : ''}>${v}</option>`).join('')}</select></td></tr>`; }).join('')}</tbody></table></div>` : `<div class="empty"><h3>No actions here</h3><p class="muted">Actions raised on your sites' risk assessments appear here.</p></div>`}</div>`;
 }
 function raiseModal(a) {
