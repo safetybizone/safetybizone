@@ -29,6 +29,7 @@ Security is enforced by the database itself (Postgres row-level security), not b
 | `migration-007-service-jobs.sql` | Service jobs and certificates (fire risk assessment, fire alarm, emergency lighting, extinguishers, PAT); defects become site actions. |
 | `migration-008-ra-photos.sql` | Photos on risk assessment controls and actions. |
 | `migration-009-permissions.sql` | Company sectors and who-can-do-what, as in the Permission master sheet. |
+| `migration-010-companies-house.sql` | Companies House details on each company (number, status, registered office, SIC codes, directors). |
 | `functions/fsa/index.ts` | Edge function `fsa` that looks up food hygiene ratings (deploy with JWT verification on). |
 | `seed.sql` | The Safetybiz starter library: 184 topics, 70 hazards, 317 controls. |
 | `topic-library.csv`, `registers.csv` | The library as spreadsheets, for review. |
@@ -38,7 +39,7 @@ Security is enforced by the database itself (Postgres row-level security), not b
 ### 1. Create the Supabase project
 1. Sign up at [supabase.com](https://supabase.com) and create a new project (choose the London region for UK data).
 2. Open **SQL Editor → New query**, paste the whole of `schema.sql` and press **Run**. If Supabase warns about tables without Row Level Security, choose **Run without RLS**: the script switches it on for every table further down.
-3. New query: paste `hardening.sql` and **Run**. Then do the same with `migration-002-hazard-sections.sql`, `migration-003-compliance-centre.sql`, `migration-004-roles-and-copy.sql`, `migration-005-food-hygiene.sql`, `migration-006-structure.sql`, `migration-007-service-jobs.sql`, `migration-008-ra-photos.sql` and `migration-009-permissions.sql`, in that order. Deploy the edge function in `functions/fsa`.
+3. New query: paste `hardening.sql` and **Run**. Then do the same with `migration-002-hazard-sections.sql`, `migration-003-compliance-centre.sql`, `migration-004-roles-and-copy.sql`, `migration-005-food-hygiene.sql`, `migration-006-structure.sql`, `migration-007-service-jobs.sql`, `migration-008-ra-photos.sql`, `migration-009-permissions.sql` and `migration-010-companies-house.sql`, in that order. Deploy the edge functions in `functions/fsa` and `functions/companies-house`, and add your Companies House API key as the secret `CH_API_KEY`.
 4. New query again: paste `seed.sql` and **Run** to load the Safetybiz library.
 5. Add yourself as the first administrator (new query, change the email and name):
    ```sql
