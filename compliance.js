@@ -92,6 +92,31 @@ export const docTypes = () => rows('compliance_doc_types').filter((t) => t.activ
 const history = (sid, tid) => rows('site_documents').filter((d) => d.site_id === sid && d.doc_type_id === tid).sort((a, b) => b.created_at.localeCompare(a.created_at));
 const current = (sid, tid) => history(sid, tid)[0];
 const addMonths = (d, m) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCMonth(x.getUTCMonth() + m); return x.toISOString().slice(0, 10); };
+// Superadmin only (and not while viewing as a company): permanently delete a certificate, with a reason.
+export const isSuper = () => !!(window.__me && window.__me.role === 'admin' && window.__me.is_super && !window.__viewAs);
+function certDeleteModal(kind, id) {
+  openModal(`<h3>Delete this certificate permanently?</h3><p>${kind === 'job' ? 'The issued certificate, its filed copy in the Compliance centre and the defects it raised are removed.' : 'This certificate record and its file are removed. The previous certificate (if any) becomes the current one again.'}</p>
+  <p class="hint">Use this for test data or a certificate issued in error. The deletion and your reason are kept in the admin log.</p>
+  <label>Reason (required)<textarea id="cd-r" style="min-height:60px" placeholder="e.g. Test certificate, issued to the wrong site"></textarea></label>
+  <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn dng" data-act="ccDelGo" data-kind="${kind}" data-id="${id}">Delete permanently</button></div>`);
+}
+async function certDelete(kind, id, btn) {
+  const reason = ($('#cd-r')?.value || '').trim(); if (reason.length < 3) return toast('Give a reason', true);
+  btn.disabled = true;
+  const { data: paths, error } = await sb.rpc('delete_certificate', { kind, rid: id, reason });
+  if (error) { btn.disabled = false; return toast(error.message, true); }
+  if (paths && paths.length) await sb.storage.from('compliance').remove(paths).catch(() => {});
+  if (kind === 'job') {
+    const j = byId('service_jobs', id);
+    D.actions = rows('actions').filter((x) => x.service_job_id !== id);
+    if (j?.site_document_id) D.site_documents = rows('site_documents').filter((x) => x.id !== j.site_document_id);
+    D.service_jobs = rows('service_jobs').filter((x) => x.id !== id);
+    closeModal(); toast('Certificate deleted'); location.hash = '#/services';
+  } else {
+    D.site_documents = rows('site_documents').filter((x) => x.id !== id);
+    closeModal(); toast('Certificate deleted'); window.__render();
+  }
+}
 export function docStatus(d) {
   if (!d) return 'Missing';
   if (d.not_applicable) return 'Not applicable';
@@ -125,7 +150,7 @@ export function ccView(route, ctx) {
 function siteLabel(s, ctx) { return ctx.admin ? `${ctx.clientName(s.client_id)} · ${s.name}` : s.name; }
 
 function ccOverview(ctx) {
-  const sites = rows('sites').filter((s) => !ctx.clientFilter || s.client_id === ctx.clientFilter)
+  const sites = rows('sites').filter((s) => (s.status || 'Open') !== 'Archived' && (!ctx.clientFilter || s.client_id === ctx.clientFilter))
     .sort((a, b) => (ctx.admin ? ctx.clientName(a.client_id).localeCompare(ctx.clientName(b.client_id)) : 0) || (b.is_head_office - a.is_head_office) || a.name.localeCompare(b.name));
   const ids = sites.map((s) => s.id), t = ccTotals(ids), att = ccAttention(ids, 12), low = fhrsLow(ids);
   fhrsRefreshStale(sites);
@@ -149,7 +174,7 @@ function ccSite(sid, ctx) {
   fhrsRefreshStale([s], 1);
   return `<div class="page"><a class="btn sm ghost" href="#/${ctx.base}">← Compliance centre</a>
   <div class="sect" style="margin-top:8px"><div><h2>${esc(s.name)}</h2><p class="hint">${ctx.admin ? esc(ctx.clientName(s.client_id)) + ' · ' : ''}${esc(s.address || 'No address recorded')}</p></div>
-  <div class="row">${tag('Valid')} ${c.Valid} ${tag('Due soon')} ${c['Due soon']} ${tag('Expired')} ${c.Expired} ${tag('Missing')} ${c.Missing}${ctx.admin ? `<button class="btn sm pri" data-act="svNew" data-s="${sid}">+ Service job</button>` : ''}</div></div>
+  <div class="row">${(s.status || 'Open') !== 'Open' ? `<span class="tag ${s.status === 'Archived' ? 'bad' : 'warn'}">${esc(s.status)}</span>` : ''}${tag('Valid')} ${c.Valid} ${tag('Due soon')} ${c['Due soon']} ${tag('Expired')} ${c.Expired} ${tag('Missing')} ${c.Missing}${ctx.siteDetails ? `<a class="btn sm" href="#/site/${sid}">Site details</a>` : ''}${ctx.admin ? `<button class="btn sm pri" data-act="svNew" data-s="${sid}">+ Service job</button>` : ''}</div></div>
   ${defectsPanel(sid)}
   ${fhrsPanel(s)}
   <h3 style="font-size:16px;margin:6px 0 10px">Certificates and service records</h3>
@@ -159,7 +184,7 @@ function ccSite(sid, ctx) {
     <td data-l="Status">${tag(st)}</td><td data-l="Issued">${live ? fd(d.issue_date) : '—'}</td><td data-l="Expires" class="${st === 'Expired' ? 'od-t' : ''}">${live ? fd(d.expiry_date) : '—'}</td>
     <td data-l="Provider">${live ? esc([d.provider, d.reference].filter(Boolean).join(' · ') || '—') : '—'}</td>
     <td data-l="File">${live && d.file_path ? `<button class="btn sm" data-act="ccOpen" data-id="${d.id}">View</button>` : '—'}${h > 1 ? ` <button class="btn sm ghost" data-act="ccHist" data-s="${sid}" data-t="${t.id}">History (${h})</button>` : ''}</td>
-    <td><div class="row" style="flex-wrap:nowrap"><button class="btn sm ${st === 'Valid' || st === 'Not applicable' ? '' : 'pri'}" data-act="ccUpload" data-s="${sid}" data-t="${t.id}">${live ? 'Update' : 'Upload'}</button><button class="btn sm ghost" data-act="ccNA" data-s="${sid}" data-t="${t.id}">${st === 'Not applicable' ? 'Applies' : 'N/A'}</button></div></td></tr>`;
+    <td><div class="row" style="flex-wrap:nowrap"><button class="btn sm ${st === 'Valid' || st === 'Not applicable' ? '' : 'pri'}" data-act="ccUpload" data-s="${sid}" data-t="${t.id}">${live ? 'Update' : 'Upload'}</button><button class="btn sm ghost" data-act="ccNA" data-s="${sid}" data-t="${t.id}">${st === 'Not applicable' ? 'Applies' : 'N/A'}</button>${ctx.admin && isSuper() && live ? `<button class="btn sm ghost dng" data-act="ccDel" data-kind="document" data-id="${d.id}" aria-label="Delete certificate">Delete</button>` : ''}</div></td></tr>`;
   }).join('')}</tbody></table></div>
   <p class="hint">Upload a PDF or photo of each certificate (up to ${MAX_MB} MB). The expiry date fills in from the document type's usual validity — change it if the certificate says otherwise. Earlier certificates are kept in the history.</p></div>`;
 }
@@ -233,6 +258,8 @@ export async function ccClick(d, btn) {
     case 'ccSave': await uploadSave(d.s, d.t, btn); return true;
     case 'ccOpen': { const doc = byId('site_documents', d.id); if (doc) await openFile(doc); return true; }
     case 'ccHist': histModal(d.s, d.t); return true;
+    case 'ccDel': if (!isSuper()) return true; certDeleteModal(d.kind, d.id); return true;
+    case 'ccDelGo': await certDelete(d.kind, d.id, btn); return true;
     case 'ccNA': { const isNA = docStatus(current(d.s, d.t)) === 'Not applicable'; const s = byId('sites', d.s);
       await ins('site_documents', { site_id: d.s, client_id: s.client_id, doc_type_id: d.t, not_applicable: !isNA }).catch(() => {}); window.__render(); return true; }
     case 'ccTypes': typesModal(); return true;
