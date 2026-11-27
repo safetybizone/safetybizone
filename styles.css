@@ -23,6 +23,7 @@ aside a.nv svg{width:19px;height:19px;flex:none}
 aside a.nv .c{margin-left:auto;font-size:12px;background:rgba(255,255,255,.15);border-radius:10px;padding:1px 8px}
 aside .me{margin-top:auto;border-top:1px solid rgba(255,255,255,.1);padding:14px 10px 0;font-size:13px;color:#a9c4c1}
 aside .me b{display:block;color:#fff;font-size:14px}
+aside .mnav{display:none;align-items:center;gap:6px;background:none;border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:8px;padding:8px 12px;font:600 14px Inter;cursor:pointer}
 aside .me button{margin-top:8px;background:none;border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:6px;padding:6px 10px;cursor:pointer;font:500 13px Inter}
 .topbar{display:flex;align-items:center;gap:14px;padding:14px max(3vw,18px);border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:5;min-height:64px}
 .topbar h1{font-size:20px}
@@ -177,8 +178,10 @@ tr.od td{background:#fff4f2}
   .shell{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 1fr;align-content:start}
   aside{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;padding:10px 12px;gap:4px}
   aside .lg{width:150px;margin:0 6px}aside .grp{display:none}
-  aside .navs{display:flex;overflow-x:auto;width:100%;gap:4px}aside a.nv{flex:none}
-  aside .me{margin:0 0 0 auto;border:0;padding:0}aside .me b,aside .me span{display:none}aside .me button{margin:0}
+  aside .mnav{display:inline-flex;margin-left:auto}
+  aside .navs{display:none;width:100%;flex-direction:column;gap:2px;padding-top:6px}aside.open .navs{display:flex}
+  aside .me{display:none;width:100%;margin:6px 0 0;padding:10px 6px 4px}aside.open .me{display:block}
+  .tabs{flex-wrap:wrap;overflow:visible}
   .topbar{position:static}
   .auth{grid-template-columns:minmax(0,1fr)}.auth .l{padding:28px}
 }
@@ -269,3 +272,4 @@ table.svreg td{padding:4px 6px}table.svreg input,table.svreg select{min-height:3
 .chcard{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:8px}
 .g2 .tn input{max-width:170px}
 .g2 .tn .muted{font-size:12.5px}
+.pwbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:14px 28px 0;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--soft)}.pwbar span{flex:1;min-width:200px}
