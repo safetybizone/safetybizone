@@ -263,3 +263,7 @@ table.svreg td{padding:4px 6px}table.svreg input,table.svreg select{min-height:3
 .hn.hnb{border:0;cursor:pointer;font:700 15px Inter,system-ui,sans-serif;white-space:nowrap}
 .hzsum{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;font-size:13.5px;cursor:pointer}
 .rph{margin-top:6px}
+/* Companies House */
+.chfind .pick{border-radius:8px}.chopt{width:100%;border:0;border-bottom:1px solid var(--line);background:#fff;font:inherit;color:inherit;cursor:pointer;text-align:left}
+.chopt:hover{background:#fafcfb}
+.chcard{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:8px}
