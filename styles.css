@@ -252,3 +252,14 @@ table.svreg td{padding:4px 6px}table.svreg input,table.svreg select{min-height:3
 .pq input{flex:1 1 220px;min-height:46px;font-size:16px}
 .pq .seg button{min-height:44px;padding:0 14px}
 .pq-p{background:#1f7d6d;border-color:#1f7d6d;color:#fff;min-height:46px}.pq-f{background:var(--vh);border-color:var(--vh);color:#fff;min-height:46px}
+/* hazard contents and collapsing */
+.hzindex{position:sticky;top:64px;z-index:4;background:var(--bg);padding:10px 0 8px;margin:-4px 0 12px;border-bottom:1px solid var(--line)}
+.hzchips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
+.hzchip{flex:none;display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);background:#fff;border-radius:20px;padding:5px 11px;font:500 13px Inter,system-ui,sans-serif;color:var(--ink);cursor:pointer;max-width:280px;white-space:nowrap}
+.hzchip .t{overflow:hidden;text-overflow:ellipsis}.hzchip .s{font-size:12px;color:var(--mute)}
+.hzchip.bad{border-color:#f3c7c3;background:#fdeeea}.hzchip.bad .s{color:var(--vh);font-weight:600}
+.hzchip.warn{border-color:#f5dc8e;background:#fff8e1}.hzchip.ok{border-color:#bfe5dc;background:#eef8f5}
+.hz{scroll-margin-top:170px}.hz.shut{padding:12px 16px}
+.hn.hnb{border:0;cursor:pointer;font:700 15px Inter,system-ui,sans-serif;white-space:nowrap}
+.hzsum{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;font-size:13.5px;cursor:pointer}
+.rph{margin-top:6px}
