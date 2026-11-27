@@ -102,6 +102,7 @@ export async function fetchAll(table, cols = '*', build = (q) => q) {
 export function niceError(e) {
   const m = (e && (e.message || e.error_description)) || String(e);
   if (e && e.code === '23503') return "Can't delete this: it has signed acknowledgements or other records linked to it. Archive it instead.";
+  if (e && e.code === '23505' && /org_units_unique_name/.test(m)) return 'There is already a brand or region with that name in this organisation.';
   if (e && e.code === '23505') return 'That already exists (for example, the email is already invited).';
   if (e && e.code === '42501') return "You don't have permission to do that.";
   return m;
