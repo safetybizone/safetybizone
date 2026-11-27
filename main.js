@@ -69,7 +69,7 @@ document.addEventListener('click', async (e) => {
 });
 const onField = (e, isChange) => {
   const el = e.target; if (!me || !el.dataset) return;
-  if (!(el.dataset.b || el.dataset.ui || el.dataset.so || el.dataset.au != null || el.dataset.f || el.dataset.st || el.dataset.ax || el.dataset.sj)) return;
+  if (!(el.dataset.b || el.dataset.ui || el.dataset.so || el.dataset.au != null || el.dataset.f || el.dataset.st || el.dataset.ax || el.dataset.sj || el.dataset.sf)) return;
   if (isChange === isText(el)) return; // text boxes save on input, others on change
   const re = builder() ? adminField(el, isChange) : portalField(el, isChange);
   if (re) render();
