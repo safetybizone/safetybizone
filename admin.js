@@ -4,17 +4,24 @@ import {
   CTYPES, CATS, PEOPLE, STATUSES, ASTAT, PRI, QS, auditScore, auditOutcome, ocol, toast, openModal, closeModal, confirmBox,
   fetchAll, rows, byId, ins, upd, del, queue, niceError, field, area, sel, shell, signFormHTML, mountPad, submitSignOff, onRerender,
 } from './core.js';
-import { assessmentPDF, signOffsPDF, ctlScore, pct } from './pdf.js';
+import { assessmentPDF, signOffsPDF, ctlScore, raScore, ctlLabel } from './pdf.js';
+import { photoStrip } from './photos.js';
 import { ccView, ccClick, ccTotals, ccAttention, fhrsChip, fhrsLow, fhrsRefreshStale } from './compliance.js';
 import { svList, svView, svField, svClick, setSvQuery, FORMS } from './services.js';
 
-const S = { me: null, asCo: null, sel: new Set(), ccClient: '', q: '', fClient: '', fStatus: '', af: 'open', draft: null, logs: {}, sigs: {}, hq: '', hcat: '', cq: '', so: {}, tq: '', tsec: '' };
+const S = { me: null, asCo: null, sel: new Set(), ccClient: '', q: '', fClient: '', fStatus: '', af: 'open', draft: null, logs: {}, sigs: {}, hq: '', hcat: '', cq: '', so: {}, tq: '', tsec: '', hzOpen: {}, hzProb: false };
 let route = [];
 // Company administrators (client_admin) use this same builder, limited by the database to their own company.
 // A Safetybiz admin can "Open as company" (S.asCo): the builder then shows only that company, as its administrator sees it.
 const CO = () => S.me.role === 'client_admin' || !!S.asCo;
 const SUPER = () => S.me.role === 'admin' && !!S.me.is_super && !S.asCo;
 const myCo = () => S.asCo || S.me.client_id;
+// Who may add, change and remove people (see the Permission master sheet): superadmins and company administrators.
+// A Safetybiz administrator only adds a company's first company administrator.
+const PEOPLE_OK = () => SUPER() || S.me.role === 'client_admin';
+const hasCoAdmin = (cid) => rows('portal_invites').some((i) => i.client_id === cid && i.role === 'client_admin');
+// Topic library sectors a company can be in (General topics are always shown).
+const SECTORS = () => [...new Set(rows('topic_library').map((t) => t.sector))].filter((x) => x && x !== 'General').sort();
 
 // ---------- load ----------
 export async function loadAdmin(me) {
@@ -38,6 +45,8 @@ function viewAs(cid) {
   byClient.forEach((t) => (D[t] = rows(t).filter((r) => (t === 'clients' ? r.id : r.client_id) === cid)));
   ['assessment_hazards', 'assessment_controls', 'actions', 'audits', 'acknowledgements'].forEach((t) => (D[t] = rows(t).filter((r) => raIds.has(r.assessment_id) || (t === 'actions' && r.site_id && byId('sites', r.site_id)))));
   D.service_jobs = rows('service_jobs').filter((j) => j.status === 'Issued');
+  const secs = byId('clients', cid)?.sectors || [];
+  D.topic_library = rows('topic_library').filter((t) => t.active && (t.sector === 'General' || secs.includes(t.sector)));
   D.profiles = rows('profiles').filter((p) => p.client_id === cid || p.id === S.me.id);
   S.sel.clear(); S.fClient = ''; S.so = {};
 }
@@ -68,6 +77,7 @@ const empty = (h, p, btn = '') => `<div class="empty"><h3>${h}</h3><p class="mut
 // ---------- company structure (brand → region → area → site) ----------
 const KIND = { brand: 'Brand', region: 'Region', area: 'Area' };
 const MGR_TITLE = { brand: 'Brand manager', region: 'Regional manager', area: 'Area manager' };
+const ROLE = { client_admin: 'Company administrator', manager: 'Regional / area manager', staff: 'Staff' };
 const units = (cid) => rows('org_units').filter((u) => u.client_id === cid);
 const kids = (uid, cid) => units(cid).filter((u) => (u.parent_id || null) === (uid || null)).sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name));
 function unitTree(cid) { const out = []; const walk = (pid, d) => kids(pid, cid).forEach((u) => { out.push([u, d]); walk(u.id, d + 1); }); walk(null, 0); return out; }
@@ -178,24 +188,29 @@ function onboardModal() {
   <label class="full">Company name<input id="ob-name" placeholder="e.g. Harbourside Joinery Ltd"></label>
   <label class="full">Head office address<textarea id="ob-addr" style="min-height:60px"></textarea></label>
   <label>Contact name<input id="ob-cn"></label><label>Contact email<input id="ob-ce" type="email"></label><label>Phone<input id="ob-ph"></label></div>
+  <h4 style="margin:18px 0 6px">Sectors</h4><p class="hint" style="margin:0 0 6px">The company administrator sees the topic library topics for these sectors, plus General topics.</p>
+  <div class="row" id="ob-sec">${SECTORS().map((x) => `<label class="chk" style="border:1px solid var(--line);border-radius:20px;padding:5px 11px"><input type="checkbox" value="${esc(x)}"> ${esc(x)}</label>`).join('')}</div>
   <h4 style="margin:18px 0 6px">Other sites</h4><p class="hint" style="margin:0 0 6px">A Head office site is added automatically. One site per line: <b>Site name — address</b></p>
   <textarea id="ob-sites" placeholder="Warehouse — Unit 4, Quay Road&#10;Shop — 12 High Street"></textarea>
-  <h4 style="margin:18px 0 6px">Company administrator (optional)</h4><p class="hint" style="margin:0 0 6px">Linked to this company only. They can build and publish its risk assessments, add sites and staff, and keep the sign-off records and certificates.</p>
+  <h4 style="margin:18px 0 6px">Company administrator (required)</h4><p class="hint" style="margin:0 0 6px">Linked to this company only. They add the company's other administrators, regional and area managers and staff, build and publish its risk assessments, and keep the sign-off records and certificates.</p>
   <div class="g3"><label>Name<input id="ob-mn"></label><label>Email<input id="ob-me" type="email"></label><label>Job title<input id="ob-mj"></label></div>
   <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="onboardSave">Onboard client</button></div>`, true);
 }
 async function onboardSave() {
   const name = $('#ob-name').value.trim(); if (!name) return toast('Enter the company name', true);
-  const c = { id: uid(), name, address: $('#ob-addr').value.trim() || null, contact_name: $('#ob-cn').value.trim() || null, contact_email: $('#ob-ce').value.trim() || null, phone: $('#ob-ph').value.trim() || null };
+  const sectors = [...document.querySelectorAll('#ob-sec input:checked')].map((i) => i.value);
+  const c = { id: uid(), name, sectors, address: $('#ob-addr').value.trim() || null, contact_name: $('#ob-cn').value.trim() || null, contact_email: $('#ob-ce').value.trim() || null, phone: $('#ob-ph').value.trim() || null };
   const siteLines = $('#ob-sites').value || '';
   const mn = $('#ob-mn').value.trim(), me = $('#ob-me').value.trim().toLowerCase(), mj = $('#ob-mj').value.trim();
-  if (me && !/^\S+@\S+\.\S+$/.test(me)) return toast('Enter a valid manager email', true);
+  if (!mn || !me) return toast('Enter the company administrator\'s name and email', true);
+  if (!/^\S+@\S+\.\S+$/.test(me)) return toast('Enter a valid email for the company administrator', true);
+  if (!sectors.length) return toast('Choose at least one sector', true);
   closeModal();
   try {
     await ins('clients', c);
     D.sites = rows('sites').concat(await fetchAll('sites', '*', (q) => q.eq('client_id', c.id)));
     for (const ln of siteLines.split('\n').map((s) => s.trim()).filter(Boolean)) { const [n, ...ad] = ln.split(/\s+[—–-]\s+/); await ins('sites', { client_id: c.id, name: n.trim(), address: ad.join(' - ').trim() || null }); }
-    if (me) await ins('portal_invites', { email: me, role: 'client_admin', client_id: c.id, full_name: mn || null, job_title: mj || null });
+    await ins('portal_invites', { email: me, role: 'client_admin', client_id: c.id, full_name: mn || null, job_title: mj || null });
     toast('Client onboarded'); location.hash = '#/client/' + c.id;
   } catch (e) { /* toast already shown */ }
 }
@@ -204,21 +219,23 @@ function vClient(id) {
   const c = byId('clients', id); if (!c) return `<div class="page">${empty('Client not found', '')}</div>`;
   const sites = clientSites(id), ras = rows('assessments').filter((a) => a.client_id === id), inv = rows('portal_invites').filter((i) => i.client_id === id);
   const joined = (email) => rows('profiles').some((p) => p.email === email);
-  const portal = location.origin + location.pathname;
+  const portal = location.origin + location.pathname, canP = PEOPLE_OK(), secs = c.sectors || [];
   return `<div class="page">${CO() ? '' : '<a class="btn sm ghost" href="#/clients">← All clients</a>'}
   <div class="sect" style="margin-top:8px"><h2>${esc(c.name)}</h2><div class="row"><button class="btn" data-act="newRA" data-client="${id}">+ Create risk assessment</button>${CO() ? '' : `<button class="btn teal" data-act="openAs" data-id="${id}">Open as company</button>`}${SUPER() ? `<button class="btn dng" data-act="delClient" data-id="${id}">Delete client</button>` : ''}</div></div>
   <div class="panel"><h3 style="font-size:16px;margin-bottom:12px">Head office and contact</h3><div class="g2">${field(`clients|${id}|name`, c.name, 'Company name')}${field(`clients|${id}|contact_name`, c.contact_name, 'Contact name')}${field(`clients|${id}|contact_email`, c.contact_email, 'Contact email', 'email')}${field(`clients|${id}|phone`, c.phone, 'Phone')}${area(`clients|${id}|notes`, c.notes, 'Notes', ' class="full"')}</div></div>
+  <div class="panel"><h3 style="font-size:16px;margin-bottom:4px">Sectors</h3><p class="hint" style="margin:0 0 8px">${CO() ? 'Set by Safetybiz. The topic library shows topics for these sectors and General topics.' : 'The company administrator sees topic library topics for these sectors, plus General topics.'}</p>
+  <div class="row">${CO() ? (secs.map((x) => `<span class="tag">${esc(x)}</span>`).join('') || '<span class="muted">None set</span>') : SECTORS().concat(secs.filter((x) => !SECTORS().includes(x))).map((x) => `<button class="chipbtn${secs.includes(x) ? ' on' : ''}" data-act="secTog" data-id="${id}" data-v="${esc(x)}">${secs.includes(x) ? '✓ ' : ''}${esc(x)}</button>`).join('')}</div></div>
   ${structurePanel(id)}
   <div class="panel"><div class="sect"><h3>Sites</h3><button class="btn sm" data-act="addSite" data-id="${id}">+ Add site</button></div>
   <div class="tw"><table class="stack"><thead><tr><th>Site</th><th>Belongs to</th><th>Address</th><th>Site contact</th><th>Phone</th><th>Assessments</th><th>Food hygiene</th><th></th><th></th></tr></thead><tbody>${sites.map((s) => `<tr><td data-l="Site"><input id="s-${s.id}-n" data-b="sites|${s.id}|name" value="${esc(s.name)}" aria-label="Site name">${s.is_head_office ? '<span class="muted">Head office</span>' : ''}</td><td data-l="Belongs to">${units(id).length ? sel(`sites|${s.id}|unit_id`, s.unit_id || '', unitOpts(id), '') : '<span class="muted">—</span>'}</td><td data-l="Address"><input id="s-${s.id}-a" data-b="sites|${s.id}|address" value="${esc(s.address)}" aria-label="Address"></td><td data-l="Site contact"><input id="s-${s.id}-c" data-b="sites|${s.id}|site_contact" value="${esc(s.site_contact)}" aria-label="Site contact"></td><td data-l="Phone"><input id="s-${s.id}-p" data-b="sites|${s.id}|phone" value="${esc(s.phone)}" aria-label="Phone"></td><td data-l="Assessments">${ras.filter((a) => a.site_id === s.id).length}</td><td data-l="Food hygiene">${fhrsChip(s)}</td><td><a class="btn sm" href="#/compliance/${s.id}">Site profile</a></td><td>${s.is_head_office || CO() ? '' : `<button class="btn sm ghost" data-act="delSite" data-id="${s.id}" aria-label="Remove site">✕</button>`}</td></tr>`).join('')}</tbody></table></div></div>
-  <div class="panel"><div class="sect"><div><h3>${CO() ? 'Company administrators and staff' : 'Company administrators and staff'}</h3><p class="hint">Company administrators run the whole company. Regional and area managers see the shops under their brand, region or area: they close actions, upload certificates, record sign-offs and add staff. Staff see their site and sign. Portal address: <b>${esc(portal)}</b> <button class="btn sm" data-act="copy" data-v="${esc(portal)}">Copy</button></p></div><button class="btn sm pri" data-act="invite" data-client="${id}">+ Add person</button></div>
-  ${inv.length ? `<div class="tw"><table class="stack"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Looks after</th><th>Job title</th><th>Status</th><th></th></tr></thead><tbody>${inv.map((i) => `<tr><td data-l="Name">${esc(i.full_name || '—')}</td><td data-l="Email">${esc(i.email)}</td><td data-l="Role">${sel(`portal_invites|${i.id}|role`, i.role, [['client_admin', 'Company administrator'], ['manager', 'Regional / area manager'], ['staff', 'Staff']], '')}</td><td data-l="Looks after">${i.role === 'manager' ? sel(`portal_invites|${i.id}|unit_id`, i.unit_id || '', unitOpts(id, '— choose —').slice(1), '') : i.role === 'client_admin' ? '<span class="muted">Whole company</span>' : sel(`portal_invites|${i.id}|site_id`, i.site_id || '', [['', 'All sites']].concat(sites.map((s) => [s.id, s.name])), '')}</td><td data-l="Job title">${esc(i.job_title || '—')}</td><td data-l="Status">${joined(i.email) ? '<span class="tag ok">Joined</span>' : '<span class="tag">Invited</span>'}</td><td><button class="btn sm ghost" data-act="delInvite" data-id="${i.id}" aria-label="Remove access">Remove</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nobody yet. Add a company administrator first; they can add their own staff.</p>'}</div>
+  <div class="panel"><div class="sect"><div><h3>Company administrators, managers and staff</h3><p class="hint">${canP ? '' : '<b>The company administrator adds the company\'s managers and staff.</b> '}Company administrators run the whole company. Regional and area managers see the shops under their brand, region or area: they close actions, upload certificates, record sign-offs and add staff. Staff see their site and sign. Portal address: <b>${esc(portal)}</b> <button class="btn sm" data-act="copy" data-v="${esc(portal)}">Copy</button></p></div>${canP ? `<button class="btn sm pri" data-act="invite" data-client="${id}">+ Add person</button>` : !hasCoAdmin(id) && !CO() ? `<button class="btn sm pri" data-act="invite" data-client="${id}" data-role="client_admin">+ Add company administrator</button>` : ''}</div>
+  ${inv.length ? `<div class="tw"><table class="stack"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Looks after</th><th>Job title</th><th>Status</th><th></th></tr></thead><tbody>${inv.map((i) => `<tr><td data-l="Name">${esc(i.full_name || '—')}</td><td data-l="Email">${esc(i.email)}</td><td data-l="Role">${canP ? sel(`portal_invites|${i.id}|role`, i.role, [['client_admin', 'Company administrator'], ['manager', 'Regional / area manager'], ['staff', 'Staff']], '') : esc(ROLE[i.role] || i.role)}</td><td data-l="Looks after">${!canP ? esc(i.role === 'manager' ? unitPath(i.unit_id) || '—' : i.role === 'client_admin' ? 'Whole company' : sName(i.site_id) || 'All sites') : i.role === 'manager' ? sel(`portal_invites|${i.id}|unit_id`, i.unit_id || '', unitOpts(id, '— choose —').slice(1), '') : i.role === 'client_admin' ? '<span class="muted">Whole company</span>' : sel(`portal_invites|${i.id}|site_id`, i.site_id || '', [['', 'All sites']].concat(sites.map((s) => [s.id, s.name])), '')}</td><td data-l="Job title">${esc(i.job_title || '—')}</td><td data-l="Status">${joined(i.email) ? '<span class="tag ok">Joined</span>' : '<span class="tag">Invited</span>'}</td><td>${canP ? `<button class="btn sm ghost" data-act="delInvite" data-id="${i.id}" aria-label="Remove access">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nobody yet. Add the company administrator first; they add their own managers and staff.</p>'}</div>
   <div class="panel"><div class="sect"><h3>Risk assessments</h3></div>${ras.length ? raTable(ras) : '<p class="muted">None yet.</p>'}</div></div>`;
 }
 function inviteModal(clientId, role = 'staff') {
   const sites = clientSites(clientId);
   openModal(`<h3>Add a person — ${esc(cName(clientId))}</h3><div class="g2"><label>Full name<input id="iv-n"></label><label>Email<input id="iv-e" type="email"></label><label>Job title<input id="iv-j"></label>
-  <label>Role<select id="iv-r"><option value="client_admin"${role === 'client_admin' ? ' selected' : ''}>Company administrator — runs the whole company</option><option value="manager">Regional / area manager — the shops under them</option><option value="staff"${role === 'staff' ? ' selected' : ''}>Staff — reads and signs</option></select></label>
+  <label>Role<select id="iv-r"><option value="client_admin"${role === 'client_admin' ? ' selected' : ''}>Company administrator — runs the whole company</option>${PEOPLE_OK() ? `<option value="manager">Regional / area manager — the shops under them</option><option value="staff"${role === 'staff' ? ' selected' : ''}>Staff — reads and signs</option>` : ''}</select></label>
   <label class="full" id="iv-sl">Site<select id="iv-s"><option value="">All sites</option>${sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>
   <label class="full" id="iv-ul" style="display:none">Looks after<select id="iv-u">${unitOpts(clientId).slice(1).map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('')}</select>${units(clientId).length ? '' : '<span class="hint">Add a brand, region or area on the company page first.</span>'}</label></div>
   <p class="hint">They sign in at the portal address with this email and get a one-time sign-in link. No password needed.</p>
@@ -303,7 +320,7 @@ function vRA(id, tab) {
   if (a.is_master && ['actions', 'audits', 'publish'].includes(tab)) tab = 'brandsites';
   const fn = { details: tDetails, hazards: tHazards, controls: tHazards, rating: tRating, summary: tSummary, actions: tActions, audits: tAudits, publish: tPublish, history: tHistory, brandsites: tBrandSites }[tab] || tDetails;
   return `<div class="head"><div class="row"><a class="btn sm ghost" href="#/ras">← Risk assessments</a><div class="row sp"><button class="btn sm" data-act="pdf" data-id="${id}">Export PDF</button><button class="btn sm" data-act="dupRA" data-id="${id}">Copy to other sites</button><button class="btn sm dng" data-act="delRA" data-id="${id}">Delete</button></div></div>
-  <h2>${esc(a.title || 'Untitled risk assessment')}</h2><div class="meta"><b style="color:var(--ink)">${esc(a.ref)}</b><span>${esc(cName(a.client_id))} · ${esc(raWhere(a))}</span>${a.is_master ? '<span class="tag k-brand">Brand master</span>' : statusTag(a.status) + pubTag(a)}${a.master_id && byId('assessments', a.master_id) ? `<a class="tag" href="#/ra/${a.master_id}/brandsites">From brand master</a>` : ''}${(() => { const k = ctlScore(raCtl(a.id)); return `<span>Score <b style="color:var(--ink)">${pct(k)}</b></span><span>Flagged <b style="color:${k.f ? 'var(--vh)' : 'var(--ink)'}">${k.f}</b></span><span>Actions <b style="color:var(--ink)">${raActs(a.id).filter((x) => x.status !== 'Done').length}</b></span>`; })()}${a.approved_at ? '<span class="tag ok">Complete</span>' : '<span class="tag warn">Incomplete</span>'}<span>Renewal <b class="${a.review_date && a.review_date < today() ? 'od-t' : ''}">${fd(a.review_date)}</b></span></div>
+  <h2>${esc(a.title || 'Untitled risk assessment')}</h2><div class="meta"><b style="color:var(--ink)">${esc(a.ref)}</b><span>${esc(cName(a.client_id))} · ${esc(raWhere(a))}</span>${a.is_master ? '<span class="tag k-brand">Brand master</span>' : statusTag(a.status) + pubTag(a)}${a.master_id && byId('assessments', a.master_id) ? `<a class="tag" href="#/ra/${a.master_id}/brandsites">From brand master</a>` : ''}${(() => { const k = raK(a); return `<span>Flagged <b style="color:${k.f ? 'var(--vh)' : 'var(--ink)'}">${k.f}</b></span><span>Actions <b style="color:var(--ink)">${raActs(a.id).filter((x) => x.status !== 'Done').length}</b></span>`; })()}${a.approved_at ? '<span class="tag ok">Complete</span>' : '<span class="tag warn">Incomplete</span>'}<span>Renewal <b class="${a.review_date && a.review_date < today() ? 'od-t' : ''}">${fd(a.review_date)}</b></span></div>
   <nav class="tabs">${tabs.map(([k, l, n]) => `<a href="#/ra/${id}/${k}" class="${tab === k ? 'on' : ''}">${l}${n != null ? `<span class="n">${n}</span>` : ''}</a>`).join('')}</nav></div><div class="page">${fn(a)}</div>`;
 }
 function tDetails(a) {
@@ -319,6 +336,16 @@ function tDetails(a) {
   <p class="hint">Next: pick the <a href="#/ra/${id}/hazards">hazards and their controls</a>.</p>`;
 }
 const hzCtl = (aid, hid) => raCtl(aid).filter((c) => (c.assessment_hazard_id || null) === (hid || null));
+const genCtl = (a) => { const hz = raHz(a.id); return raCtl(a.id).filter((c) => !c.assessment_hazard_id || !hz.some((h) => h.id === c.assessment_hazard_id)); };
+// Whole-assessment score: a hazard with no controls counts as flagged.
+const raK = (a) => raScore(raHz(a.id).map((h) => ({ controls: hzCtl(a.id, h.id) })), genCtl(a));
+// How a hazard stands: no controls / controls not in place (red), not rated (amber), or fine.
+function hzState(a, h) {
+  const cs = hzCtl(a.id, h.id), k = ctlScore(cs), rs = (h.risk_l || 0) * (h.risk_s || 0);
+  const why = !cs.length ? 'No controls' : k.f ? `${k.f} not in place` : !rs ? 'Not rated' : '';
+  return { cs, k, rs, why, cls: !cs.length || k.f ? 'bad' : !rs ? 'warn' : 'ok' };
+}
+const hzOpenSet = (a, hz) => (S.hzOpen[a.id] ||= new Set(hz.length <= 4 ? hz.map((h) => h.id) : []));
 function suggestedFor(a, h) {
   if (!h.register_id) return [];
   const have = new Set(hzCtl(a.id, h.id).map((c) => c.register_id).filter(Boolean));
@@ -328,7 +355,8 @@ function ctlRow(a, c) {
   const act = rows('actions').find((x) => x.assessment_control_id === c.id);
   return `<div class="cbox"><div class="ctl">${sel(`assessment_controls|${c.id}|type`, c.type, CTYPES, '')}<input id="c-${c.id}-t" data-b="assessment_controls|${c.id}|title" value="${esc(c.title)}" placeholder="Control measure" aria-label="Control measure">${sel(`assessment_controls|${c.id}|state`, c.state, [['In place', 'Yes — in place'], ['Planned', 'No — not in place'], ['N/A', 'N/A']], '')}
   ${act ? `<a class="linked" href="#/ra/${a.id}/actions">✓ Action ${act.status === 'Done' ? 'done' : act.status.toLowerCase()}</a>` : c.state === 'Planned' ? `<button class="btn sm" data-act="ctlAct" data-id="${c.id}">Create action</button>` : '<span></span>'}<button class="btn sm ghost" data-act="delCtl" data-id="${c.id}" aria-label="Remove control">✕</button></div>
-  <textarea id="c-${c.id}-d" data-b="assessment_controls|${c.id}|description" placeholder="Description (optional)" style="min-height:48px">${esc(c.description)}</textarea></div>`;
+  <textarea id="c-${c.id}-d" data-b="assessment_controls|${c.id}|description" placeholder="Description (optional)" style="min-height:48px">${esc(c.description)}</textarea>
+  <div style="margin-top:6px">${photoStrip('assessment_controls', c, false)}</div></div>`;
 }
 const RL = [[0, '–'], [1, '1 Rare'], [2, '2 Unlikely'], [3, '3 Possible'], [4, '4 Likely'], [5, '5 Almost certain']], RS = [[0, '–'], [1, '1 Negligible'], [2, '2 Minor'], [3, '3 Moderate'], [4, '4 Major'], [5, '5 Catastrophic']];
 function hzMeta(a, h) {
@@ -336,19 +364,33 @@ function hzMeta(a, h) {
   return `<div class="hzm"><div><h4>Risk score</h4><div class="row" style="flex-wrap:nowrap">${sel(`assessment_hazards|${h.id}|risk_l`, h.risk_l || 0, RL, '')}<span>×</span>${sel(`assessment_hazards|${h.id}|risk_s`, h.risk_s || 0, RS, '')}</div><div style="margin-top:6px">${chip(rs)}</div><p class="hint" style="margin-top:4px">Likelihood × severity, with the controls above in place.</p></div>
   <div><h4>Person affected</h4><div class="row">${PEOPLE.slice(0, 9).concat(pa.filter((p) => !PEOPLE.slice(0, 9).includes(p))).map((p) => `<button class="chipbtn${pa.includes(p) ? ' on' : ''}" data-act="hzPpl" data-h="${h.id}" data-v="${esc(p)}">${pa.includes(p) ? '✓ ' : ''}${esc(p)}</button>`).join('')}</div></div>
   <div class="full"><div class="row"><h4>Actions <span class="muted">(${acts.length})</span></h4><button class="btn sm sp" data-act="addAct" data-h="${h.id}">+ Add action</button></div>
-  ${acts.length ? acts.map((x) => `<div class="li" style="padding:6px 0"><span class="tag ${x.status === 'Done' ? 'ok' : isOd(x) ? 'bad' : ''}">${esc(x.status)}</span><span><b>${esc(x.title || 'Untitled action')}</b><br><span class="muted">${esc(x.owner || 'No owner')} · due ${fd(x.due_date)}</span></span></div>`).join('') + `<a class="hint" href="#/ra/${a.id}/actions">Edit actions</a>` : '<p class="muted" style="margin:2px 0">No actions for this hazard.</p>'}</div></div>`;
+  ${acts.length ? acts.map((x) => `<div class="li" style="padding:6px 0"><span class="tag ${x.status === 'Done' ? 'ok' : isOd(x) ? 'bad' : ''}">${esc(x.status)}</span><span style="flex:1"><b>${esc(x.title || 'Untitled action')}</b><br><span class="muted">${esc(x.owner || 'No owner')} · due ${fd(x.due_date)}</span>${photoStrip('actions', x, false)}</span></div>`).join('') + `<a class="hint" href="#/ra/${a.id}/actions">Edit actions</a>` : '<p class="muted" style="margin:2px 0">No actions for this hazard.</p>'}</div></div>`;
 }
 function ctlBlock(a, h) {
   const list = hzCtl(a.id, h?.id), sug = h ? suggestedFor(a, h) : [], hid = h ? h.id : '';
-  return `<div class="hzc"><div class="row" style="margin-bottom:8px"><h4 style="font-size:14.5px">Control measures <span class="muted">${h ? pct(ctlScore(list)) : '(' + list.length + ')'}</span></h4><div class="row sp"><button class="btn sm" data-act="ctlPick" data-h="${hid}">Choose from control register</button><button class="btn sm pri" data-act="ctlNew" data-h="${hid}">+ Create control</button></div></div>
+  return `<div class="hzc"><div class="row" style="margin-bottom:8px"><h4 style="font-size:14.5px">Control measures ${h && !list.length ? '<span class="tag bad">No controls — flagged</span>' : `<span class="muted">${h ? ctlLabel(list) : '(' + list.length + ')'}</span>`}</h4><div class="row sp"><button class="btn sm" data-act="ctlPick" data-h="${hid}">Choose from control register</button><button class="btn sm pri" data-act="ctlNew" data-h="${hid}">+ Create control</button></div></div>
   ${sug.length ? `<div class="sugg"><div class="row" style="margin-bottom:6px"><b style="font-size:13px">Suggested for this hazard</b><button class="btn sm sp" data-act="ctlAddAll" data-h="${hid}">Add all ${sug.length}</button></div><div class="row">${sug.map((c) => `<button class="chipbtn" data-act="ctlAddReg" data-id="${c.id}" data-h="${hid}">+ ${esc(c.title)}</button>`).join('')}</div></div>` : ''}
   ${list.length ? list.map((c) => ctlRow(a, c)).join('') : `<p class="muted" style="margin:4px 0">No controls yet — choose from the control register or create one.</p>`}</div>`;
+}
+// Contents of the hazards: one chip per hazard, coloured by how it stands. Tap to jump there.
+function hzIndex(a, hz) {
+  const st = hz.map((h) => hzState(a, h)), prob = st.filter((x) => x.why).length;
+  return `<div class="hzindex"><div class="row" style="margin-bottom:6px"><b>Contents</b><span class="muted">${hz.length} hazards${prob ? ` · <b style="color:var(--vh)">${prob} need${prob === 1 ? 's' : ''} attention</b>` : ' · all complete'}</span>
+  <div class="row sp"><button class="btn sm${S.hzProb ? ' pri' : ''}" data-act="hzProb">${S.hzProb ? 'Showing problems only' : `Only problems (${prob})`}</button><button class="btn sm" data-act="hzAll" data-v="1">Expand all</button><button class="btn sm" data-act="hzAll" data-v="">Collapse all</button></div></div>
+  <div class="hzchips">${hz.map((h, i) => `<button class="hzchip ${st[i].cls}" data-act="hzJump" data-h="${h.id}" title="${esc(h.title || 'Untitled hazard')}"><b>${i + 1}</b><span class="t">${esc(h.title || 'Untitled hazard')}</span><span class="s">${st[i].why || '✓'}</span></button>`).join('')}</div></div>`;
+}
+function hzCard(a, h, i) {
+  const open = hzOpenSet(a, raHz(a.id)).has(h.id), st = hzState(a, h), acts = raActs(a.id).filter((x) => x.assessment_hazard_id === h.id && x.status !== 'Done').length;
+  const nph = st.cs.reduce((n, c) => n + (c.photos || []).length, 0);
+  return `<div class="hz${open ? '' : ' shut'}" id="hz-${h.id}"><div class="hzh"><button class="hn hnb" data-act="hzTog" data-h="${h.id}" aria-expanded="${open}" aria-label="${open ? 'Collapse' : 'Expand'} hazard ${i + 1}">${open ? '▾' : '▸'} ${i + 1}</button><input class="t" id="h-${h.id}-t" data-b="assessment_hazards|${h.id}|title" value="${esc(h.title)}" placeholder="Hazard, e.g. Fire" aria-label="Hazard">${sel(`assessment_hazards|${h.id}|category`, h.category, CATS, '')}<button class="btn sm ghost" data-act="delHz" data-id="${h.id}">Remove</button></div>
+  ${open ? `<div style="margin-top:10px">${area(`assessment_hazards|${h.id}|description`, h.description, 'Description')}</div>${ctlBlock(a, h)}${hzMeta(a, h)}`
+    : `<div class="hzsum" data-act="hzTog" data-h="${h.id}">${st.why ? `<span class="tag ${st.cls === 'bad' ? 'bad' : 'warn'}">${esc(st.why)}</span>` : '<span class="tag ok">Complete</span>'}<span class="muted">${st.cs.length ? `${st.k.y} of ${st.k.n} controls in place` : 'No controls yet'}</span>${st.rs ? chip(st.rs, true) : ''}${acts ? `<span class="muted">· ${acts} open action${acts > 1 ? 's' : ''}</span>` : ''}${nph ? `<span class="muted">· ${nph} photo${nph > 1 ? 's' : ''}</span>` : ''}<span class="muted" style="margin-left:auto">Show</span></div>`}</div>`;
 }
 function tHazards(a) {
   const hz = raHz(a.id), gen = raCtl(a.id).filter((c) => !c.assessment_hazard_id || !hz.some((h) => h.id === c.assessment_hazard_id));
   return `<div class="sect"><div><h2>Hazards and controls</h2><p class="hint">Pick the hazards for this activity, then choose or create the controls for each one.</p></div><div class="row"><button class="btn" data-act="hzCustom">+ Custom hazard</button><button class="btn pri" data-act="hzPick">+ Add hazards from register</button></div></div>
-  ${hz.length ? hz.map((h, i) => `<div class="hz"><div class="hzh"><span class="hn">${i + 1}</span><input class="t" id="h-${h.id}-t" data-b="assessment_hazards|${h.id}|title" value="${esc(h.title)}" placeholder="Hazard, e.g. Fire" aria-label="Hazard">${sel(`assessment_hazards|${h.id}|category`, h.category, CATS, '')}<button class="btn sm ghost" data-act="delHz" data-id="${h.id}">Remove</button></div>
-  <div style="margin-top:10px">${area(`assessment_hazards|${h.id}|description`, h.description, 'Description')}</div>${ctlBlock(a, h)}${hzMeta(a, h)}</div>`).join('')
+  ${hz.length > 1 ? hzIndex(a, hz) : ''}
+  ${hz.length ? hz.map((h, i) => [h, i]).filter(([h]) => !S.hzProb || hzState(a, h).why).map(([h, i]) => hzCard(a, h, i)).join('') + (S.hzProb && !hz.some((h) => hzState(a, h).why) ? '<p class="muted">Every hazard has its controls in place and a risk score. <a href="#" data-act="hzProb">Show all hazards</a></p>' : '')
     : empty('No hazards yet', 'Pick the hazards for this activity — for example Fire, Slips, trips and falls, Manual handling — from your hazard register, or add your own.', '<button class="btn pri" data-act="hzPick">+ Add hazards from register</button>')}
   ${gen.length ? `<div class="hz"><div class="hzh" style="grid-template-columns:auto minmax(0,1fr)"><span class="hn">+</span><b style="font-size:16px">General controls <span class="muted" style="font-weight:400">— apply to the whole activity</span></b></div>${ctlBlock(a, null)}</div>` : hz.length ? '<p class="hint"><a href="#" data-act="ctlNew" data-h="">+ Add a general control</a> that applies to the whole activity.</p>' : ''}
   ${hz.length ? `<p class="hint">Next: set the <a href="#/ra/${a.id}/rating">risk rating</a> without and with controls.</p>` : ''}`;
@@ -366,9 +408,9 @@ function actionModal(a, hid) {
   <div class="ft"><button class="btn" data-act="close">Cancel</button><button class="btn pri" data-act="actSave">Raise action</button></div>`);
 }
 function tSummary(a) {
-  const k = ctlScore(raCtl(a.id)), now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const k = raK(a), now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   return `<div class="panel"><h3 style="font-size:16px;margin-bottom:10px">Summary</h3>${area(`assessments|${a.id}|summary`, a.summary, 'Comments')}
-  <p class="hint">Score ${pct(k)} · ${k.f} control${k.f === 1 ? '' : 's'} not in place · ${raActs(a.id).filter((x) => x.status !== 'Done').length} open actions.</p></div>
+  <p class="hint">${k.f} flagged${k.gaps ? ` (${k.gaps} hazard${k.gaps > 1 ? 's' : ''} with no controls)` : ''} · ${raActs(a.id).filter((x) => x.status !== 'Done').length} open actions.</p></div>
   <div class="panel"><div class="sect"><h3>Approval</h3>${a.approved_at ? '<span class="tag ok">Complete</span>' : '<span class="tag warn">Incomplete</span>'}</div>
   ${a.approved_at ? `<div class="g2"><div><span class="muted">Approved by</span><br><b>${esc(a.approved_by)}</b></div><div><span class="muted">Date and time of approval</span><br><b>${ft(a.approved_at)}</b></div>
   <div class="full"><span class="muted">Approver's signature</span><br>${a.approval_signature ? `<img src="${esc(a.approval_signature)}" alt="Approver's signature" style="max-width:320px;border:1px solid var(--line);border-radius:6px;background:#fff">` : '—'}</div></div>
@@ -383,10 +425,10 @@ function tActions(a) {
   const copts = [['', '—']].concat(raCtl(a.id).map((c) => { const h = byId('assessment_hazards', c.assessment_hazard_id); return [c.id, ((h ? h.title + ': ' : '') + (c.title || 'Untitled control')).slice(0, 60)]; }));
   const hopts = [['', 'General']].concat(raHz(a.id).map((h) => [h.id, (h.title || 'Untitled hazard').slice(0, 40)]));
   return `<div class="sect"><h2>Actions</h2><button class="btn pri" data-act="addAct">+ Add action</button></div>
-  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Action</th><th>Hazard</th><th>Control</th><th>Owner</th><th>Due</th><th>Priority</th><th>Status</th><th></th></tr></thead><tbody>${list.map((x) => `<tr class="${isOd(x) ? 'od' : ''}"><td data-l="Action" style="min-width:220px"><input id="a-${x.id}-t" data-b="actions|${x.id}|title" value="${esc(x.title)}" placeholder="What needs doing" aria-label="Action"></td><td data-l="Hazard">${sel(`actions|${x.id}|assessment_hazard_id`, x.assessment_hazard_id || '', hopts, '')}</td>
+  ${list.length ? `<div class="tw"><table class="stack"><thead><tr><th>Action</th><th>Hazard</th><th>Control</th><th>Owner</th><th>Due</th><th>Priority</th><th>Status</th><th>Photos</th><th></th></tr></thead><tbody>${list.map((x) => `<tr class="${isOd(x) ? 'od' : ''}"><td data-l="Action" style="min-width:220px"><input id="a-${x.id}-t" data-b="actions|${x.id}|title" value="${esc(x.title)}" placeholder="What needs doing" aria-label="Action"></td><td data-l="Hazard">${sel(`actions|${x.id}|assessment_hazard_id`, x.assessment_hazard_id || '', hopts, '')}</td>
   <td data-l="Control">${sel(`actions|${x.id}|assessment_control_id`, x.assessment_control_id || '', copts, '')}</td><td data-l="Owner"><input id="a-${x.id}-o" data-b="actions|${x.id}|owner" value="${esc(x.owner)}" aria-label="Owner"></td>
   <td data-l="Due"><input id="a-${x.id}-d" type="date" data-b="actions|${x.id}|due_date" value="${esc(x.due_date)}" aria-label="Due">${isOd(x) ? '<span class="od-t">Overdue</span>' : ''}</td><td data-l="Priority">${sel(`actions|${x.id}|priority`, x.priority, PRI, '')}</td>
-  <td data-l="Status">${sel(`actions|${x.id}|status`, x.status, ASTAT, '')}${x.completed_on ? `<div class="muted">Done ${fd(x.completed_on)}</div>` : ''}</td><td><button class="btn sm ghost" data-act="delAct" data-id="${x.id}" aria-label="Delete action">✕</button></td></tr>`).join('')}</tbody></table></div><p class="hint">The client can see the live status of these actions in their portal.</p>`
+  <td data-l="Status">${sel(`actions|${x.id}|status`, x.status, ASTAT, '')}${x.completed_on ? `<div class="muted">Done ${fd(x.completed_on)}</div>` : ''}</td><td data-l="Photos">${photoStrip('actions', x, false)}</td><td><button class="btn sm ghost" data-act="delAct" data-id="${x.id}" aria-label="Delete action">✕</button></td></tr>`).join('')}</tbody></table></div><p class="hint">The client can see the live status of these actions in their portal.</p>`
     : empty('No actions', 'Add actions here, from a planned control, or from an audit finding.', '')}`;
 }
 function tAudits(a) {
@@ -415,7 +457,7 @@ function tPublish(a) {
   <label>Note for this version (optional)<input id="pub-note" placeholder="e.g. Added lone working controls"></label>
   <div class="row" style="margin-top:12px"><button class="btn pri" data-act="publish" data-id="${a.id}">${cur ? 'Publish version ' + (cur + 1) : 'Publish version 1'}</button>${a.status === 'Draft' ? '<span class="muted">Status will change to Active.</span>' : ''}</div>
   ${pubs.length ? `<h4 style="margin:16px 0 6px">Versions</h4>${pubs.map((p) => `<div class="li"><span class="tag ok">v${p.version}</span><span>${ft(p.published_at)} · ${esc(person(p.published_by))}${p.note ? '<br><span class="muted">' + esc(p.note) + '</span>' : ''}</span></div>`).join('')}` : ''}</div>
-  <div class="panel"><div class="sect"><h3>Who has signed version ${cur || '–'}</h3><button class="btn sm" data-act="invite" data-client="${a.client_id}">+ Portal user</button></div>
+  <div class="panel"><div class="sect"><h3>Who has signed version ${cur || '–'}</h3>${PEOPLE_OK() ? `<button class="btn sm" data-act="invite" data-client="${a.client_id}">+ Portal user</button>` : ''}</div>
   ${aud.length ? aud.map((i) => { const p = prof(i.email), ok = p && signedBy.has(p.id); return `<div class="li">${ok ? '<span class="tag ok">Signed</span>' : cur ? '<span class="tag warn">Not yet</span>' : '<span class="tag">—</span>'}<span><b>${esc(i.full_name || i.email)}</b> · ${i.role === 'client_admin' ? 'Manager' : 'Staff'}<br><span class="muted">${esc(i.email)}${p ? '' : ' · hasn\'t signed in yet'}</span></span></div>`; }).join('') : '<p class="muted">No portal users can see this site yet. Add them on the client page.</p>'}
   <p class="hint">In-person sign-offs appear in the record below.</p></div></div>
   <div class="panel"><div class="sect"><h3>Acknowledgement record</h3><div class="row">${cur ? `<button class="btn sm" data-act="signInPerson" data-id="${a.id}">Record in-person sign-off</button>` : ''}<button class="btn sm" data-act="ackPdf" data-id="${a.id}">Export sign-offs PDF</button></div></div>
@@ -482,7 +524,7 @@ function vTopics() {
   const q = S.tq.toLowerCase(), list = rows('topic_library').filter((t) => (!S.tsec || t.sector === S.tsec) && (!q || (t.title + ' ' + (t.description || '') + ' ' + t.sector).toLowerCase().includes(q)));
   const secs = [...new Set(rows('topic_library').map((t) => t.sector))].sort(), g = {};
   list.forEach((t) => (g[t.sector] ||= []).push(t));
-  return `<div class="page"><div class="sect"><div><h2>Topic library</h2><p class="hint">Ready-made Safetybiz risk assessments. Start an assessment from a topic, then tailor it to the site.${SUPER() ? '' : ' Only a Safetybiz superadmin can change the library.'}</p></div>${SUPER() ? '<button class="btn pri" data-act="tEdit">+ Add topic</button>' : ''}</div>
+  return `<div class="page"><div class="sect"><div><h2>Topic library</h2><p class="hint">Ready-made Safetybiz risk assessments. Start an assessment from a topic, then tailor it to the site.${CO() ? ` Showing General topics and your sectors: <b>${esc((byId('clients', myCo())?.sectors || []).join(', ') || 'none set yet — ask Safetybiz')}</b>.` : SUPER() ? '' : ' Only a Safetybiz superadmin can change the library.'}</p></div>${SUPER() ? '<button class="btn pri" data-act="tEdit">+ Add topic</button>' : ''}</div>
   <div class="row" style="margin-bottom:12px"><input id="tq" type="search" data-ui="tq" value="${esc(S.tq)}" placeholder="Search topics…" style="max-width:320px"><select id="tsec" data-ui="tsec" style="width:auto"><option value="">All sectors</option>${secs.map((s) => `<option${S.tsec === s ? ' selected' : ''}>${esc(s)}</option>`).join('')}</select><span class="muted">${list.length} topics</span></div>
   ${list.length ? Object.keys(g).sort().map((s) => `<h3 style="font-size:16px;margin:18px 0 8px">${esc(s)} <span class="muted">(${g[s].length})</span></h3><div class="tw"><table class="stack"><thead><tr><th>Topic</th><th>Hazards</th><th>Controls</th><th>With controls</th><th>Used</th><th></th></tr></thead><tbody>${g[s].sort((a, b) => a.title.localeCompare(b.title)).map((t) => `<tr${SUPER() ? ` class="click" data-act="tEdit" data-id="${t.id}"` : ''}><td data-l="Topic"><b>${esc(t.title)}</b>${t.active ? '' : ' <span class="tag">Retired</span>'}<br><span class="muted">${esc((t.description || '').slice(0, 140))}</span></td><td data-l="Hazards">${tHz(t.id).length}</td><td data-l="Controls">${tCt(t.id).length}</td><td data-l="With controls">${chip(scoreOf(t, 'res'), true)}</td><td data-l="Used">${rows('assessments').filter((a) => a.topic_id === t.id).length}</td><td><button class="btn sm pri" data-act="newRA" data-topic="${t.id}">Use</button></td></tr>`).join('')}</tbody></table></div>`).join('') : empty('No topics', 'Run seed.sql for the Safetybiz starter library, or add your own.', '')}</div>`;
 }
@@ -696,7 +738,8 @@ export async function adminClick(e, b) {
     case 'addSite': await ins('sites', { client_id: d.id, name: 'New site' }); return window.__render();
     case 'delSite': if (await confirmBox('Remove this site? Sites with risk assessments cannot be removed.')) { await del('sites', d.id).catch(() => {}); window.__render(); } return;
     case 'delClient': if (await confirmBox('Delete this client, its sites and portal users? Clients with risk assessments cannot be deleted.')) { del('clients', d.id).then(() => (location.hash = '#/clients')).catch(() => {}); } return;
-    case 'invite': return inviteModal(d.client || a?.client_id);
+    case 'invite': return inviteModal(d.client || a?.client_id, d.role || (PEOPLE_OK() ? 'staff' : 'client_admin'));
+    case 'secTog': { const c = byId('clients', d.id), set = new Set(c.sectors || []); set.has(d.v) ? set.delete(d.v) : set.add(d.v); upd('clients', c.id, { sectors: [...set] }).catch(() => {}); return window.__render(); }
     case 'inviteSave': {
       const email = $('#iv-e').value.trim().toLowerCase(); if (!/^\S+@\S+\.\S+$/.test(email)) return toast('Enter a valid email', true);
       const role = $('#iv-r').value, unit = $('#iv-u')?.value || null;
@@ -731,11 +774,16 @@ export async function adminClick(e, b) {
     case 'hzPick': return pickModal('hz', a);
     case 'hzPickSave': {
       const ids = [...document.querySelectorAll('#pk-list input:checked:not(:disabled)')].map((i) => i.value); closeModal();
-      ids.forEach((rid, i) => { const r = byId('hazard_register', rid); ins('assessment_hazards', { assessment_id: a.id, register_id: r.id, title: r.title, category: r.category, description: r.description, sort: raHz(a.id).length + i }).catch(() => {}); });
+      const open = hzOpenSet(a, raHz(a.id));
+      ids.forEach((rid, i) => { const r = byId('hazard_register', rid), nid = uid(); open.add(nid); ins('assessment_hazards', { id: nid, assessment_id: a.id, register_id: r.id, title: r.title, category: r.category, description: r.description, sort: raHz(a.id).length + i }).catch(() => {}); });
       if (ids.length) toast(`${ids.length} hazard${ids.length > 1 ? 's' : ''} added — now choose the controls for each one`);
       return window.__render();
     }
-    case 'hzCustom': { const id = uid(); ins('assessment_hazards', { id, assessment_id: a.id, title: '', category: 'Other', sort: raHz(a.id).length }).catch(() => {}); window.__render(); return $(`#h-${id}-t`)?.focus(); }
+    case 'hzCustom': { const id = uid(); hzOpenSet(a, raHz(a.id)).add(id); ins('assessment_hazards', { id, assessment_id: a.id, title: '', category: 'Other', sort: raHz(a.id).length }).catch(() => {}); window.__render(); return $(`#h-${id}-t`)?.focus(); }
+    case 'hzTog': { const o = hzOpenSet(a, raHz(a.id)); o.has(d.h) ? o.delete(d.h) : o.add(d.h); return window.__render(); }
+    case 'hzAll': S.hzOpen[a.id] = new Set(d.v ? raHz(a.id).map((h) => h.id) : []); return window.__render();
+    case 'hzProb': S.hzProb = !S.hzProb; return window.__render();
+    case 'hzJump': { const h = byId('assessment_hazards', d.h); if (S.hzProb && h && !hzState(a, h).why) S.hzProb = false; hzOpenSet(a, raHz(a.id)).add(d.h); window.__render(); document.getElementById('hz-' + d.h)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
     case 'delHz': if (await confirmBox('Remove this hazard and its controls from the assessment?', 'Remove')) { await del('assessment_hazards', d.id).catch(() => {}); D.assessment_controls = rows('assessment_controls').filter((c) => c.assessment_hazard_id !== d.id); window.__render(); } return;
     case 'ctlPick': return pickModal('ctl', a, d.h);
     case 'ctlPickSave': { const ids = [...document.querySelectorAll('#pk-list input:checked:not(:disabled)')].map((i) => i.value); closeModal(); ids.forEach((rid, i) => addCtlFromReg(a, byId('control_register', rid), i, d.h).catch(() => {})); return window.__render(); }
